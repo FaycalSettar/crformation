@@ -38,10 +38,10 @@ with st.expander("Étape 1 : Importer les fichiers", expanded=True):
 # Étape 2 : Lecture et configuration
 if excel_file and word_file:
     df = pd.read_excel(excel_file)
-    if "Référence Session" not in df.columns or "Nom" not in df.columns or "Prénom" not in df.columns:
-        st.error("Le fichier Excel doit contenir les colonnes : Référence Session, Prénom, Nom")
+    if "session" not in df.columns or "Nom" not in df.columns or "Prénom" not in df.columns:
+        st.error("Le fichier Excel doit contenir les colonnes : session, Prénom, Nom")
     else:
-        sessions = df.groupby("Référence Session")
+        sessions = df.groupby("session")
 
         st.markdown("### Étape 2 : Configurer les réponses manuelles")
         session_configs = {}
@@ -128,7 +128,7 @@ if excel_file and word_file:
                         zipf.write(filepath, filename)
 
                         recap_data.append({
-                            "Référence Session": session_id,
+                            "session": session_id,
                             "Nom Formateur": config["nom_formateur"],
                             "Participants": config["nb_participants"],
                             "Satisfaction": config["satisfaction"]
