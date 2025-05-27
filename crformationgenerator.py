@@ -8,9 +8,9 @@ from zipfile import ZipFile
 import re
 
 st.set_page_config(page_title="Générateur de QCM", layout="centered")
-st.title("📝 Générateur de QCM personnalisés")
+st.title("📄 Générateur de QCM (avec figement manuel des réponses)")
 
-# -- Fonctions
+# === Fonctions utilitaires ===
 def remplacer_placeholders(paragraph, replacements):
     if not paragraph.text:
         return
@@ -33,7 +33,6 @@ def detecter_questions(doc):
                 "index": i,
                 "texte": f"{question_num} - {match_question.group(2)}?",
                 "reponses": [],
-                "correct_idx": None,
                 "original_text": texte
             }
             questions.append(current_question)
@@ -42,24 +41,20 @@ def detecter_questions(doc):
             if match_reponse:
                 lettre = match_reponse.group(1)
                 texte_rep = match_reponse.group(2).strip()
-                is_correct = match_reponse.group(3) is not None
                 current_question["reponses"].append({
                     "index": i,
                     "lettre": lettre,
                     "texte": texte_rep,
-                    "correct": is_correct,
                     "original_text": texte
                 })
-                if is_correct:
-                    current_question["correct_idx"] = len(current_question["reponses"]) - 1
-    return [q for q in questions if q["correct_idx"] is not None and len(q["reponses"]) >= 2]
+    return [q for q in questions if len(q["reponses"]) >= 2]
 
-# -- Chargement fichiers
-with st.expander("📁 Étape 1 : Importation des fichiers", expanded=True):
-    excel_file = st.file_uploader("Fichier Excel (colonnes : Prénom, Nom, Email)", type="xlsx")
+# === Import des fichiers ===
+with st.expander("📁 Étape 1 : Importation", expanded=True):
+    excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
     word_file = st.file_uploader("Modèle Word du QCM", type="docx")
 
-# -- Traitement modèle Word
+# === Lecture Word une seule fois ===
 if word_file and ('questions' not in st.session_state or st.session_state.get('current_template') != word_file.name):
     doc = Document(word_file)
     st.session_state.questions = detecter_questions(doc)
@@ -67,9 +62,9 @@ if word_file and ('questions' not in st.session_state or st.session_state.get('c
     st.session_state.reponses_figees = {}
     st.session_state.current_template = word_file.name
 
-# -- Étape 2 : Configuration manuelle
+# === Configuration manuelle ===
 if 'questions' in st.session_state:
-    st.markdown("### ⚙️ Étape 2 : Choisir les réponses figées")
+    st.markdown("### ⚙️ Étape 2 : Choix des réponses figées")
 
     for q in st.session_state['questions']:
         q_id = q['index']
@@ -80,12 +75,11 @@ if 'questions' in st.session_state:
         with col2:
             if figer:
                 options = [f"{r['lettre']} - {r['texte']}" for r in q['reponses']]
-                default_idx = q['correct_idx']
-                bonne = st.selectbox(f"Bonne réponse pour Q{q_num}", options=options, index=default_idx, key=f"bonne_{q_id}")
+                bonne = st.selectbox(f"Bonne réponse pour Q{q_num}", options=options, key=f"bonne_{q_id}")
                 st.session_state.figees[q_id] = True
                 st.session_state.reponses_figees[q_id] = options.index(bonne)
 
-# -- Génération par participant
+# === Génération QCM ===
 def generer_qcm(doc_model, row):
     doc = Document(doc_model)
     replacements = {
@@ -104,25 +98,22 @@ def generer_qcm(doc_model, row):
     for q in st.session_state.questions:
         reponses = q['reponses'].copy()
         is_figee = st.session_state.figees.get(q['index'], False)
+
         if is_figee:
-            bonne_idx = st.session_state.reponses_figees.get(q['index'], q['correct_idx'])
+            bonne_idx = st.session_state.reponses_figees.get(q['index'], 0)
             reponse_correcte = reponses.pop(bonne_idx)
             reponses.insert(0, reponse_correcte)
         else:
-            correct_idx = q['correct_idx']
-            reponse_correcte = reponses.pop(correct_idx)
             random.shuffle(reponses)
-            reponses.insert(0, reponse_correcte)
 
-        for rep in reponses:
-            idx = rep['index']
-            checkbox = "☑" if reponses.index(rep) == 0 else "☐"
+        for idx, rep in enumerate(reponses):
+            checkbox = "☑" if idx == 0 else "☐"
             base = rep['original_text'].split(' ', 1)[0]
-            ligne = f"{base} - {rep['texte']} {checkbox}"
-            doc.paragraphs[idx].text = ligne
+            nouvelle_ligne = f"{base} - {rep['texte']} {checkbox}"
+            doc.paragraphs[rep['index']].text = nouvelle_ligne
     return doc
 
-# -- Étape 3 : Génération des fichiers
+# === Étape 3 : Génération ===
 if excel_file and word_file and 'questions' in st.session_state:
     if st.button("🚀 Générer les QCM"):
         df = pd.read_excel(excel_file)
@@ -135,9 +126,9 @@ if excel_file and word_file and 'questions' in st.session_state:
                     prenom = re.sub(r'\W+', '_', str(row.get('Prénom', '')))
                     nom = re.sub(r'\W+', '_', str(row.get('Nom', '')))
                     filename = f"QCM_{prenom}_{nom}.docx"
-                    filepath = os.path.join(tmpdir, filename)
-                    doc.save(filepath)
-                    zipf.write(filepath, arcname=filename)
+                    path = os.path.join(tmpdir, filename)
+                    doc.save(path)
+                    zipf.write(path, arcname=filename)
             with open(zip_path, "rb") as f:
                 st.success("✅ QCM générés avec succès !")
-                st.download_button("📥 Télécharger l'archive ZIP", data=f, file_name="QCM_Personnalises.zip", mime="application/zip")
+                st.download_button("📦 Télécharger l'archive ZIP", data=f, file_name="QCM_Personnalises.zip", mime="application/zip")
