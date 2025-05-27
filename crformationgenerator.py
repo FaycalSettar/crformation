@@ -8,9 +8,9 @@ from zipfile import ZipFile
 import re
 
 st.set_page_config(page_title="Générateur de QCM", layout="centered")
-st.title("📝 Générateur de QCM personnalisés (sans correction)")
+st.title("📝 Générateur de QCM personnalisés")
 
-# Fonctions utilitaires
+# -- Fonctions
 def remplacer_placeholders(paragraph, replacements):
     if not paragraph.text:
         return
@@ -22,9 +22,8 @@ def remplacer_placeholders(paragraph, replacements):
 def detecter_questions(doc):
     questions = []
     current_question = None
-    pattern = re.compile(r'^(\d+[\. ]*\d*)\s*[-\u2013\u2014)\s.]*\s*(.+?)\?$')
-    reponse_pattern = re.compile(r'^([A-D])[\s\-\u2013\u2014).]+\s*(.*?)(\{\{checkbox\}\})?\s*$')
-
+    pattern = re.compile(r'^(\d+[\. ]*\d*)\s*[-–—)\s.]*\s*(.+?)\?$')
+    reponse_pattern = re.compile(r'^([A-D])[\s\-–—).]+\s*(.*?)(\{\{checkbox\}\})?\s*$')
     for i, para in enumerate(doc.paragraphs):
         texte = para.text.strip()
         match_question = pattern.match(texte)
@@ -55,41 +54,43 @@ def detecter_questions(doc):
                     current_question["correct_idx"] = len(current_question["reponses"]) - 1
     return [q for q in questions if q["correct_idx"] is not None and len(q["reponses"]) >= 2]
 
-# Fichiers
-with st.expander("📁 Étape 1 : Import des fichiers", expanded=True):
-    excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
+# -- Chargement fichiers
+with st.expander("📁 Étape 1 : Importation des fichiers", expanded=True):
+    excel_file = st.file_uploader("Fichier Excel (colonnes : Prénom, Nom, Email)", type="xlsx")
     word_file = st.file_uploader("Modèle Word du QCM", type="docx")
 
-# Préparation des questions à figer
-if word_file:
-    if 'questions' not in st.session_state or st.session_state.get('current_template') != word_file.name:
-        doc = Document(word_file)
-        st.session_state.questions = detecter_questions(doc)
-        st.session_state.figees = {}
-        st.session_state.reponses_figees = {}
-        st.session_state.current_template = word_file.name
+# -- Traitement modèle Word
+if word_file and ('questions' not in st.session_state or st.session_state.get('current_template') != word_file.name):
+    doc = Document(word_file)
+    st.session_state.questions = detecter_questions(doc)
+    st.session_state.figees = {}
+    st.session_state.reponses_figees = {}
+    st.session_state.current_template = word_file.name
 
-# Configuration manuelle
-st.markdown("### ⚙️ Étape 2 : Configurer les questions à figer")
-for q in st.session_state.get('questions', []):
-    q_id = q['index']
-    q_num = q['texte'].split()[0]
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        figer = st.checkbox(f"Figer Q{q_num}", value=st.session_state.figees.get(q_id, False), key=f"figer_{q_id}")
-    with col2:
-        if figer:
-            options = [f"{r['lettre']} - {r['texte']}" for r in q['reponses']]
-            bonne = st.selectbox(f"Bonne réponse Q{q_num}", options=options, index=q['correct_idx'], key=f"bonne_{q_id}")
-            st.session_state.figees[q_id] = True
-            st.session_state.reponses_figees[q_id] = options.index(bonne)
+# -- Étape 2 : Configuration manuelle
+if 'questions' in st.session_state:
+    st.markdown("### ⚙️ Étape 2 : Choisir les réponses figées")
 
-# Génération
+    for q in st.session_state['questions']:
+        q_id = q['index']
+        q_num = q['texte'].split()[0]
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            figer = st.checkbox(f"Figer Q{q_num}", value=st.session_state.figees.get(q_id, False), key=f"figer_{q_id}")
+        with col2:
+            if figer:
+                options = [f"{r['lettre']} - {r['texte']}" for r in q['reponses']]
+                default_idx = q['correct_idx']
+                bonne = st.selectbox(f"Bonne réponse pour Q{q_num}", options=options, index=default_idx, key=f"bonne_{q_id}")
+                st.session_state.figees[q_id] = True
+                st.session_state.reponses_figees[q_id] = options.index(bonne)
+
+# -- Génération par participant
 def generer_qcm(doc_model, row):
     doc = Document(doc_model)
     replacements = {
-        '{{prenom}}': str(row['Prénom']),
-        '{{nom}}': str(row['Nom']),
+        '{{prenom}}': str(row.get('Prénom', '')),
+        '{{nom}}': str(row.get('Nom', '')),
         '{{email}}': str(row.get('Email', ''))
     }
     for para in doc.paragraphs:
@@ -119,24 +120,24 @@ def generer_qcm(doc_model, row):
             base = rep['original_text'].split(' ', 1)[0]
             ligne = f"{base} - {rep['texte']} {checkbox}"
             doc.paragraphs[idx].text = ligne
-
     return doc
 
-# Génération QCM
-if excel_file and word_file and st.session_state.get('questions'):
+# -- Étape 3 : Génération des fichiers
+if excel_file and word_file and 'questions' in st.session_state:
     if st.button("🚀 Générer les QCM"):
         df = pd.read_excel(excel_file)
+        df.columns = df.columns.str.strip()
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_path = os.path.join(tmpdir, "QCM_Generes.zip")
             with ZipFile(zip_path, 'w') as zipf:
                 for _, row in df.iterrows():
                     doc = generer_qcm(word_file, row)
-                    prenom = re.sub(r'\W+', '_', str(row['Prénom']))
-                    nom = re.sub(r'\W+', '_', str(row['Nom']))
+                    prenom = re.sub(r'\W+', '_', str(row.get('Prénom', '')))
+                    nom = re.sub(r'\W+', '_', str(row.get('Nom', '')))
                     filename = f"QCM_{prenom}_{nom}.docx"
-                    path = os.path.join(tmpdir, filename)
-                    doc.save(path)
-                    zipf.write(path, arcname=filename)
+                    filepath = os.path.join(tmpdir, filename)
+                    doc.save(filepath)
+                    zipf.write(filepath, arcname=filename)
             with open(zip_path, "rb") as f:
-                st.success("✅ Tous les QCM ont été générés avec succès !")
-                st.download_button("📦 Télécharger l'archive ZIP", data=f, file_name="QCM_Personnalises.zip", mime="application/zip")
+                st.success("✅ QCM générés avec succès !")
+                st.download_button("📥 Télécharger l'archive ZIP", data=f, file_name="QCM_Personnalises.zip", mime="application/zip")
