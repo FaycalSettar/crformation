@@ -6,11 +6,9 @@ import tempfile
 from zipfile import ZipFile
 import re
 
-# Configuration de la page
 st.set_page_config(page_title="Compte Rendu Formation", layout="centered")
 st.title("Générateur de Comptes Rendus de Formation")
 
-# Fonction pour remplacer les champs {{...}} dans un paragraphe
 def remplacer_placeholders(paragraph, replacements):
     for key, value in replacements.items():
         if key in paragraph.text:
@@ -19,7 +17,6 @@ def remplacer_placeholders(paragraph, replacements):
                 if key in inline[i].text:
                     inline[i].text = inline[i].text.replace(key, value)
 
-# Fonction pour cocher les cases dans le document
 def cocher_checkbox(doc, choix):
     for para in doc.paragraphs:
         text = para.text.strip()
@@ -30,12 +27,10 @@ def cocher_checkbox(doc, choix):
                 else:
                     para.text = text.replace("{{checkbox}}", "☐")
 
-# Étape 1 : Importation des fichiers
 with st.expander("Étape 1 : Importer les fichiers", expanded=True):
     excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
     word_file = st.file_uploader("Modèle Word de compte rendu", type="docx")
 
-# Étape 2 : Lecture et configuration
 if excel_file and word_file:
     df = pd.read_excel(excel_file)
     if "session" not in df.columns or "Nom" not in df.columns or "Prénom" not in df.columns:
@@ -128,8 +123,8 @@ if excel_file and word_file:
                         zipf.write(filepath, filename)
 
                         recap_data.append({
-                            "session": session_id,
-                            "Nom Formateur": config["nom_formateur"],
+                            "Session": session_id,
+                            "Formateur": config["nom_formateur"],
                             "Participants": config["nb_participants"],
                             "Satisfaction": config["satisfaction"]
                         })
