@@ -37,10 +37,12 @@ POSITIVE_OPTIONS = {
     "homogeneite": ["Oui"],
     "questions": ["Toutes les questions", "A peu près toutes"],
     "adaptation": ["Oui"],
-    "suivi": ["Oui"]
+    "suivi": ["Oui"],
+    # Ajout des options pour la première question
+    "deroule": ["Satisfait"]
 }
 
-# Détection des blocs de checkbox
+# Détection des blocs de checkbox - ajout du groupe pour la première question
 CHECKBOX_GROUPS = {
     "satisfaction": ["Très satisfait", "Satisfait", "Moyennement satisfait", "Insatisfait", "Non satisfait"],
     "motivation": ["Très motivés", "Motivés", "Pas motivés"],
@@ -48,7 +50,9 @@ CHECKBOX_GROUPS = {
     "homogeneite": ["Oui", "Non"],
     "questions": ["Toutes les questions", "A peu près toutes", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", "Je n'ai pas pu répondre à la majorité des questions"],
     "adaptation": ["Oui", "Non"],
-    "suivi": ["Oui", "Non", "Non concerné"]
+    "suivi": ["Oui", "Non", "Non concerné"],
+    # Nouveau groupe pour la première question
+    "deroule": ["Satisfait", "Moyennement satisfait", "Non satisfait"]
 }
 
 # Étape 1 : Importer les fichiers
@@ -147,8 +151,9 @@ if excel_file and word_file:
                                             )
 
                         # Ajout des sections supplémentaires
-                        doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
-                        doc.add_paragraph("\nAutres observations :\n" + observations)
+                        if pistes or observations:
+                            doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
+                            doc.add_paragraph("\nAutres observations :\n" + observations)
 
                         # Enregistrement
                         filename = f"Compte_Rendu_{session_id}.docx"
