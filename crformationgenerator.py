@@ -29,7 +29,7 @@ CHECKBOX_GROUPS = {
     "suivi": ["Oui", "Non", "Non concerné"]
 }
 
-# Fichiers d'import
+# Étape 1 : Importer les fichiers
 with st.expander("Etape 1 : Importer les fichiers", expanded=True):
     excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
     word_file = st.file_uploader("Modèle Word du compte rendu", type="docx")
@@ -69,37 +69,59 @@ if excel_file and word_file:
                             "{{duree_formation}}": str(first["nb d'heure"]),
                             "{{nb_participants}}": str(len(participants))
                         }
+                        # Remplacement des placeholders dans les paragraphes
                         for para in doc.paragraphs:
                             remplacer_placeholders(para, replacements)
+                        # Remplacement des placeholders dans les tables
                         for table in doc.tables:
                             for row in table.rows:
                                 for cell in row.cells:
                                     for para in cell.paragraphs:
                                         remplacer_placeholders(para, replacements)
 
-                        # Cocher les réponses :
+                        # Cocher les réponses (version corrigée) :
                         for para in doc.paragraphs:
-                            texte = para.text.strip().replace(" ", " ")
+                            texte = para.text.strip().replace(" ", " ")
                             for groupe, options in CHECKBOX_GROUPS.items():
                                 for opt in options:
-                                    if opt in texte:
+                                    # Correspondance mot-à-mot pour éviter les sous-chaînes
+                                    if re.search(rf"\b{re.escape(opt)}\b", texte):
+                                        # Si on a fixé ce groupe et que le choix correspond à opt
                                         if reponses_figees.get(groupe) == opt:
-                                            para.text = texte.replace("{{checkbox}}", "☑")  # ☑ = ☑
+                                            para.text = texte.replace("{{checkbox}}", "☑")
+                                        # Si le groupe est figé mais opt n'est pas celui choisi
                                         elif groupe in reponses_figees:
-                                            para.text = texte.replace("{{checkbox}}", "☐")  # ☐ = ☐
-                                        elif not reponses_figees.get(groupe) and random.choice([True, False]):
+                                            para.text = texte.replace("{{checkbox}}", "☐")
+                                        # Si pas de figé, on tire au sort
+                                        elif groupe not in reponses_figees and random.choice([True, False]):
                                             para.text = texte.replace("{{checkbox}}", "☑")
                                         else:
                                             para.text = texte.replace("{{checkbox}}", "☐")
 
+                                        # Mise à jour de texte après remplacement
+                                        texte = para.text
+                                        # On arrête de tester les autres options de ce groupe
+                                        break
+                                # Si une option de ce groupe a déjà été traitée, on sort de la boucle groupe
+                                if re.search(rf"\b({'|'.join(map(re.escape, options))})\b", texte):
+                                    break
+
+                        # Ajout des sections "Avis & pistes d'amélioration" et "Autres observations"
                         doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
                         doc.add_paragraph("\nAutres observations :\n" + observations)
 
+                        # Enregistrement du document pour chaque session
                         filename = f"Compte_Rendu_{session_id}.docx"
                         path = os.path.join(tmpdir, filename)
                         doc.save(path)
                         zipf.write(path, arcname=filename)
 
+                # Bouton de téléchargement de l'archive ZIP
                 with open(zip_path, "rb") as f:
                     st.success("Comptes rendus générés avec succès !")
-                    st.download_button("📅 Télécharger l'archive ZIP", data=f, file_name="QCM_Sessions.zip", mime="application/zip")
+                    st.download_button(
+                        "📅 Télécharger l'archive ZIP",
+                        data=f,
+                        file_name="QCM_Sessions.zip",
+                        mime="application/zip"
+                    )
