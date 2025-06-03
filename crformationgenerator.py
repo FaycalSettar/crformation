@@ -19,7 +19,7 @@ def remplacer_placeholders(paragraph, replacements):
                 if key in run.text:
                     run.text = run.text.replace(key, val)
 
-# Fonction pour itérer sur tous les paragraphes (y compris dans les tables)
+# Fonction pour itérer sur tous les paragraphes
 def iter_all_paragraphs(doc):
     for para in doc.paragraphs:
         yield para
@@ -28,6 +28,17 @@ def iter_all_paragraphs(doc):
             for cell in row.cells:
                 for para in cell.paragraphs:
                     yield para
+
+# Définition des réponses positives pour chaque groupe
+POSITIVE_OPTIONS = {
+    "satisfaction": ["Très satisfait", "Satisfait"],
+    "motivation": ["Très motivés", "Motivés"],
+    "assiduite": ["Très motivés", "Motivés"],
+    "homogeneite": ["Oui"],
+    "questions": ["Toutes les questions", "A peu près toutes"],
+    "adaptation": ["Oui"],
+    "suivi": ["Oui"]
+}
 
 # Détection des blocs de checkbox
 CHECKBOX_GROUPS = {
@@ -81,11 +92,11 @@ if excel_file and word_file:
                             "{{nb_participants}}": str(len(participants))
                         }
                         
-                        # Remplacement des placeholders dans tous les paragraphes
+                        # Remplacement des placeholders
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
-                        # CORRECTION : Nouveau traitement des checkbox
+                        # Collecte des paragraphes avec checkbox
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
@@ -104,15 +115,28 @@ if excel_file and word_file:
                         for groupe, opt, para in checkbox_paras:
                             group_to_paras[groupe].append((opt, para))
 
-                        # Traiter chaque groupe
+                        # Traitement des réponses
                         for groupe, paras in group_to_paras.items():
+                            options_presentes = [opt for opt, _ in paras]
+                            
                             # Déterminer l'option à cocher
                             if groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
                             else:
-                                options_presentes = [opt for opt, _ in paras]
-                                option_choisie = random.choice(options_presentes) if options_presentes else None
+                                # Sélection aléatoire uniquement parmi les réponses positives
+                                positives_disponibles = [
+                                    opt for opt in options_presentes 
+                                    if groupe in POSITIVE_OPTIONS and opt in POSITIVE_OPTIONS[groupe]
+                                ]
+                                
+                                # Si des positives sont disponibles, choisir aléatoirement parmi elles
+                                if positives_disponibles:
+                                    option_choisie = random.choice(positives_disponibles)
+                                else:
+                                    # Si pas de positives disponibles, choisir aléatoirement parmi toutes
+                                    option_choisie = random.choice(options_presentes) if options_presentes else None
 
+                            # Appliquer le choix
                             if option_choisie:
                                 for opt, para in paras:
                                     for run in para.runs:
@@ -122,17 +146,17 @@ if excel_file and word_file:
                                                 "☑" if opt == option_choisie else "☐"
                                             )
 
-                        # Ajout des sections "Avis & pistes d'amélioration" et "Autres observations"
+                        # Ajout des sections supplémentaires
                         doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
                         doc.add_paragraph("\nAutres observations :\n" + observations)
 
-                        # Enregistrement du document pour chaque session
+                        # Enregistrement
                         filename = f"Compte_Rendu_{session_id}.docx"
                         path = os.path.join(tmpdir, filename)
                         doc.save(path)
                         zipf.write(path, arcname=filename)
 
-                # Bouton de téléchargement de l'archive ZIP
+                # Téléchargement
                 with open(zip_path, "rb") as f:
                     st.success("Comptes rendus générés avec succès !")
                     st.download_button(
