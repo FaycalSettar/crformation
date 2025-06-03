@@ -6,6 +6,7 @@ import tempfile
 from zipfile import ZipFile
 import random
 import re
+from collections import defaultdict
 
 st.set_page_config(page_title="Générateur de QCM par session", layout="centered")
 st.title("📄 Générateur de QCM par session (figé ou aléatoire)")
@@ -17,6 +18,16 @@ def remplacer_placeholders(paragraph, replacements):
             for run in paragraph.runs:
                 if key in run.text:
                     run.text = run.text.replace(key, val)
+
+# Fonction pour itérer sur tous les paragraphes (y compris dans les tables)
+def iter_all_paragraphs(doc):
+    for para in doc.paragraphs:
+        yield para
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    yield para
 
 # Détection des blocs de checkbox
 CHECKBOX_GROUPS = {
@@ -69,42 +80,47 @@ if excel_file and word_file:
                             "{{duree_formation}}": str(first["nb d'heure"]),
                             "{{nb_participants}}": str(len(participants))
                         }
-                        # Remplacement des placeholders dans les paragraphes
-                        for para in doc.paragraphs:
+                        
+                        # Remplacement des placeholders dans tous les paragraphes
+                        for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
-                        # Remplacement des placeholders dans les tables
-                        for table in doc.tables:
-                            for row in table.rows:
-                                for cell in row.cells:
-                                    for para in cell.paragraphs:
-                                        remplacer_placeholders(para, replacements)
 
-                        # Cocher les réponses (version corrigée) :
-                        for para in doc.paragraphs:
-                            texte = para.text.strip().replace(" ", " ")
-                            for groupe, options in CHECKBOX_GROUPS.items():
-                                for opt in options:
-                                    # Correspondance mot-à-mot pour éviter les sous-chaînes
-                                    if re.search(rf"\b{re.escape(opt)}\b", texte):
-                                        # Si on a fixé ce groupe et que le choix correspond à opt
-                                        if reponses_figees.get(groupe) == opt:
-                                            para.text = texte.replace("{{checkbox}}", "☑")
-                                        # Si le groupe est figé mais opt n'est pas celui choisi
-                                        elif groupe in reponses_figees:
-                                            para.text = texte.replace("{{checkbox}}", "☐")
-                                        # Si pas de figé, on tire au sort
-                                        elif groupe not in reponses_figees and random.choice([True, False]):
-                                            para.text = texte.replace("{{checkbox}}", "☑")
-                                        else:
-                                            para.text = texte.replace("{{checkbox}}", "☐")
-
-                                        # Mise à jour de texte après remplacement
-                                        texte = para.text
-                                        # On arrête de tester les autres options de ce groupe
-                                        break
-                                # Si une option de ce groupe a déjà été traitée, on sort de la boucle groupe
-                                if re.search(rf"\b({'|'.join(map(re.escape, options))})\b", texte):
+                        # CORRECTION : Nouveau traitement des checkbox
+                        checkbox_paras = []
+                        for para in iter_all_paragraphs(doc):
+                            if "{{checkbox}}" in para.text:
+                                texte = re.sub(r'\s+', ' ', para.text).strip()
+                                for groupe, options in CHECKBOX_GROUPS.items():
+                                    for opt in options:
+                                        if re.search(rf'\b{re.escape(opt)}\b', texte):
+                                            checkbox_paras.append((groupe, opt, para))
+                                            break
+                                    else:
+                                        continue
                                     break
+
+                        # Grouper les paragraphes par groupe
+                        group_to_paras = defaultdict(list)
+                        for groupe, opt, para in checkbox_paras:
+                            group_to_paras[groupe].append((opt, para))
+
+                        # Traiter chaque groupe
+                        for groupe, paras in group_to_paras.items():
+                            # Déterminer l'option à cocher
+                            if groupe in reponses_figees:
+                                option_choisie = reponses_figees[groupe]
+                            else:
+                                options_presentes = [opt for opt, _ in paras]
+                                option_choisie = random.choice(options_presentes) if options_presentes else None
+
+                            if option_choisie:
+                                for opt, para in paras:
+                                    for run in para.runs:
+                                        if "{{checkbox}}" in run.text:
+                                            run.text = run.text.replace(
+                                                "{{checkbox}}", 
+                                                "☑" if opt == option_choisie else "☐"
+                                            )
 
                         # Ajout des sections "Avis & pistes d'amélioration" et "Autres observations"
                         doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
