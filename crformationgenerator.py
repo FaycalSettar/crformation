@@ -63,8 +63,8 @@ if excel_file and word_file:
     df = pd.read_excel(excel_file)
     df.columns = df.columns.str.strip()
 
-    # Colonnes requises mises à jour
-    required_columns = ["session", "nom", "prénom", "formation", "nb d'heure", "Nom", "Prénom"]
+    # Colonnes requises corrigées selon vos données
+    required_columns = ["session", "formateur", "formation", "nb d'heure", "Nom", "Prénom"]
     if not set(required_columns).issubset(df.columns):
         st.error(f"Colonnes manquantes dans le fichier Excel. Colonnes requises : {required_columns}")
         st.info(f"Colonnes disponibles : {list(df.columns)}")
@@ -90,10 +90,10 @@ if excel_file and word_file:
                         doc = Document(word_file)
                         first = participants.iloc[0]
                         
-                        # Replacements corrigés selon le template
+                        # Replacements corrigés selon vos colonnes Excel
                         replacements = {
-                            "{{nom}}": str(first["nom"]),
-                            "{{prénom}}": str(first["prénom"]),
+                            "{{nom}}": str(first["formateur"]).split()[0] if len(str(first["formateur"]).split()) > 0 else str(first["formateur"]),
+                            "{{prénom}}": str(first["formateur"]).split()[1] if len(str(first["formateur"]).split()) > 1 else "",
                             "{{ref_session}}": str(session_id),
                             "{{formation_dispensee}}": str(first["formation"]),
                             "{{duree_formation}}": str(first["nb d'heure"]),
