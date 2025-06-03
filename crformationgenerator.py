@@ -19,7 +19,7 @@ def remplacer_placeholders(paragraph, replacements):
                 if key in run.text:
                     run.text = run.text.replace(key, val)
 
-# Fonction pour itérer sur tous les paragraphes
+# Fonction pour itérer sur tous les paragraphes (y compris ceux dans les tableaux)
 def iter_all_paragraphs(doc):
     for para in doc.paragraphs:
         yield para
@@ -38,11 +38,11 @@ POSITIVE_OPTIONS = {
     "questions": ["Toutes les questions", "A peu près toutes"],
     "adaptation": ["Oui"],
     "suivi": ["Oui"],
-    # Ajout des options pour la première question
+    # Pour la première question ("Déroulé de la formation")
     "deroule": ["Satisfait"]
 }
 
-# Détection des blocs de checkbox - ajout du groupe pour la première question
+# Détection des blocs de checkbox – ajout du groupe pour la première question
 CHECKBOX_GROUPS = {
     "satisfaction": ["Très satisfait", "Satisfait", "Moyennement satisfait", "Insatisfait", "Non satisfait"],
     "motivation": ["Très motivés", "Motivés", "Pas motivés"],
@@ -51,7 +51,7 @@ CHECKBOX_GROUPS = {
     "questions": ["Toutes les questions", "A peu près toutes", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", "Je n'ai pas pu répondre à la majorité des questions"],
     "adaptation": ["Oui", "Non"],
     "suivi": ["Oui", "Non", "Non concerné"],
-    # Nouveau groupe pour la première question
+    # Nouveau groupe pour la première question ("Déroulé de la formation")
     "deroule": ["Satisfait", "Moyennement satisfait", "Non satisfait"]
 }
 
@@ -65,6 +65,7 @@ if excel_file and word_file:
     df = pd.read_excel(excel_file)
     df.columns = df.columns.str.strip()
 
+    # Vérification des colonnes obligatoires
     if not set(["session", "formateur", "formation", "nb d'heure", "Nom", "Prénom"]).issubset(df.columns):
         st.error("Colonnes manquantes dans le fichier Excel.")
     else:
@@ -95,73 +96,77 @@ if excel_file and word_file:
                             "{{duree_formation}}": str(first["nb d'heure"]),
                             "{{nb_participants}}": str(len(participants))
                         }
-                        
-                        # Remplacement des placeholders
+
+                        # Remplacement des placeholders dans tout le document
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
-                        # Collecte des paragraphes avec checkbox
+                        # Collecte de tous les paragraphes contenant une option de checkbox,
+                        # sans filtrer sur la présence de "{{checkbox}}"
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
-                            if "{{checkbox}}" in para.text:
-                                texte = re.sub(r'\s+', ' ', para.text).strip()
-                                for groupe, options in CHECKBOX_GROUPS.items():
-                                    for opt in options:
-                                        if re.search(rf'\b{re.escape(opt)}\b', texte):
-                                            checkbox_paras.append((groupe, opt, para))
-                                            break
-                                    else:
-                                        continue
-                                    break
+                            # On nettoie les espaces multiples pour faciliter la recherche par regex
+                            texte = re.sub(r'\s+', ' ', para.text).strip()
+                            for groupe, options in CHECKBOX_GROUPS.items():
+                                for opt in options:
+                                    # Correspondance mot-à-mot (borne de mot) pour éviter les sous-chaînes
+                                    if re.search(rf'\b{re.escape(opt)}\b', texte):
+                                        checkbox_paras.append((groupe, opt, para))
+                                        # On arrête la boucle 'for opt in options' dès qu'un opt est trouvé
+                                        break
+                                else:
+                                    # Cette clause 'else' s'exécute si la boucle 'for opt' ne fait pas de break
+                                    continue
+                                # Si on a trouvé un opt pour ce groupe, on arrête la boucle 'for groupe'
+                                break
 
-                        # Grouper les paragraphes par groupe
+                        # Regrouper les paragraphes par groupe
                         group_to_paras = defaultdict(list)
                         for groupe, opt, para in checkbox_paras:
                             group_to_paras[groupe].append((opt, para))
 
-                        # Traitement des réponses
+                        # Pour chaque groupe, déterminer l'option à cocher
                         for groupe, paras in group_to_paras.items():
                             options_presentes = [opt for opt, _ in paras]
-                            
-                            # Déterminer l'option à cocher
+
+                            # Si l'utilisateur a figé ce groupe, on prend la valeur figée
                             if groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
                             else:
-                                # Sélection aléatoire uniquement parmi les réponses positives
+                                # On cherche les options "positives" pour ce groupe
                                 positives_disponibles = [
-                                    opt for opt in options_presentes 
+                                    opt for opt in options_presentes
                                     if groupe in POSITIVE_OPTIONS and opt in POSITIVE_OPTIONS[groupe]
                                 ]
-                                
-                                # Si des positives sont disponibles, choisir aléatoirement parmi elles
                                 if positives_disponibles:
+                                    # Choix aléatoire parmi les positives
                                     option_choisie = random.choice(positives_disponibles)
                                 else:
-                                    # Si pas de positives disponibles, choisir aléatoirement parmi toutes
+                                    # Sinon, on choisit aléatoirement parmi toutes les options présentes
                                     option_choisie = random.choice(options_presentes) if options_presentes else None
 
-                            # Appliquer le choix
+                            # Appliquer le choix de case à cocher
                             if option_choisie:
                                 for opt, para in paras:
                                     for run in para.runs:
                                         if "{{checkbox}}" in run.text:
                                             run.text = run.text.replace(
-                                                "{{checkbox}}", 
+                                                "{{checkbox}}",
                                                 "☑" if opt == option_choisie else "☐"
                                             )
 
-                        # Ajout des sections supplémentaires
+                        # Ajout des sections "Avis & pistes d'amélioration" et "Autres observations"
                         if pistes or observations:
                             doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
                             doc.add_paragraph("\nAutres observations :\n" + observations)
 
-                        # Enregistrement
+                        # Enregistrement du document pour chaque session
                         filename = f"Compte_Rendu_{session_id}.docx"
                         path = os.path.join(tmpdir, filename)
                         doc.save(path)
                         zipf.write(path, arcname=filename)
 
-                # Téléchargement
+                # Bouton de téléchargement de l'archive ZIP
                 with open(zip_path, "rb") as f:
                     st.success("Comptes rendus générés avec succès !")
                     st.download_button(
