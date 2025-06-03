@@ -19,7 +19,7 @@ def remplacer_placeholders(paragraph, replacements):
                 if key in run.text:
                     run.text = run.text.replace(key, val)
 
-# Fonction pour itérer sur tous les paragraphes
+# Fonction pour itérer sur tous les paragraphes (y compris ceux dans les tableaux)
 def iter_all_paragraphs(doc):
     for para in doc.paragraphs:
         yield para
@@ -29,19 +29,19 @@ def iter_all_paragraphs(doc):
                 for para in cell.paragraphs:
                     yield para
 
-# Définition des réponses positives pour chaque groupe (CORRIGÉ selon le template)
+# Définition des réponses positives pour chaque groupe
 POSITIVE_OPTIONS = {
-    "deroulement": ["Satisfait"],  # Premier groupe satisfaction (Déroulé de la formation)
+    "deroulement": ["Satisfait"],                   # "Déroulé de la formation"
     "motivation": ["Très motivés", "Motivés"],
-    "assiduite": ["Très motivés", "Motivés"],  # Assidus utilise les mêmes options que motivés
+    "assiduite": ["Très motivés", "Motivés"],       # même options que motivation
     "homogeneite": ["Oui"],
     "questions": ["Toutes les questions", "A peu près toutes"],
     "adaptation": ["Oui"],
     "suivi": ["Oui"],
-    "satisfaction_globale": ["Très satisfait", "Satisfait"]  # Deuxième groupe satisfaction (niveau global)
+    "satisfaction_globale": ["Très satisfait", "Satisfait"]  # "Niveau global de satisfaction"
 }
 
-# Détection des blocs de checkbox (CORRIGÉ selon le template)
+# Détection des blocs de checkbox
 CHECKBOX_GROUPS = {
     "deroulement": ["Satisfait", "Moyennement satisfait", "Non satisfait"],
     "motivation": ["Très motivés", "Motivés", "Pas motivés"],
@@ -58,12 +58,12 @@ with st.expander("Etape 1 : Importer les fichiers", expanded=True):
     excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
     word_file = st.file_uploader("Modèle Word du compte rendu", type="docx")
 
-# Traitement
+# Traitement principal
 if excel_file and word_file:
     df = pd.read_excel(excel_file)
     df.columns = df.columns.str.strip()
 
-    # Colonnes requises corrigées selon vos données
+    # Vérification des colonnes obligatoires
     required_columns = ["session", "formateur", "formation", "nb d'heure", "Nom", "Prénom"]
     if not set(required_columns).issubset(df.columns):
         st.error(f"Colonnes manquantes dans le fichier Excel. Colonnes requises : {required_columns}")
@@ -89,8 +89,8 @@ if excel_file and word_file:
                     for session_id, participants in sessions:
                         doc = Document(word_file)
                         first = participants.iloc[0]
-                        
-                        # Replacements corrigés selon vos colonnes Excel
+                        # Remplacements des balises (ex. {{nom}}, {{ref_session}}, etc.)
+                        # Adaptez bien selon vos placeholders dans le document Word
                         replacements = {
                             "{{nom}}": str(first["formateur"]).split()[0] if len(str(first["formateur"]).split()) > 0 else str(first["formateur"]),
                             "{{prénom}}": str(first["formateur"]).split()[1] if len(str(first["formateur"]).split()) > 1 else "",
@@ -99,163 +99,106 @@ if excel_file and word_file:
                             "{{duree_formation}}": str(first["nb d'heure"]),
                             "{{nb_participants}}": str(len(participants))
                         }
-                       
-                        # Remplacement des placeholders
+                        # Parcours de tout le document pour remplacer les balises
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
-                        # Collecte des paragraphes avec checkbox - Version simplifiée et robuste
+                        # ----- DÉTECTION DES CHECKBOX « ☐ » ----- #
+                        # On repère chaque paragraphe commençant par le symbole "☐"
+                        all_paras = list(iter_all_paragraphs(doc))
                         checkbox_paras = []
-                        
-                        # Parcourir tous les paragraphes et identifier par mots-clés spécifiques
-                        for para in iter_all_paragraphs(doc):
-                            if "{{checkbox}}" in para.text:
-                                texte = re.sub(r'\s+', ' ', para.text).strip()
-                                
-                                # Identification par mots-clés uniques dans le texte
-                                if "Toutes les questions" in texte:
-                                    checkbox_paras.append(("questions", "Toutes les questions", para))
-                                elif "A peu près toutes" in texte:
-                                    checkbox_paras.append(("questions", "A peu près toutes", para))
-                                elif "quelques sujets sur lesquels" in texte:
-                                    checkbox_paras.append(("questions", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", para))
-                                elif "majorité des questions" in texte:
-                                    checkbox_paras.append(("questions", "Je n'ai pas pu répondre à la majorité des questions", para))
-                                elif "Très satisfait" in texte:
-                                    checkbox_paras.append(("satisfaction_globale", "Très satisfait", para))
-                                elif "Insatisfait" in texte:
-                                    checkbox_paras.append(("satisfaction_globale", "Insatisfait", para))
-                                elif "Non satisfait" in texte and "Moyennement" not in texte:
-                                    # Distinguer "Non satisfait" du déroulé vs satisfaction globale
-                                    if "Très satisfait" in str(para.text) or any("Très satisfait" in str(p.text) for p in iter_all_paragraphs(doc) if p != para):
-                                        checkbox_paras.append(("satisfaction_globale", "Non satisfait", para))
-                                    else:
-                                        checkbox_paras.append(("deroulement", "Non satisfait", para))
-                                elif "Satisfait" in texte and "Très" not in texte and "Moyennement" not in texte and "Non" not in texte and "Insatisfait" not in texte:
-                                    # C'est soit déroulement soit satisfaction globale
-                                    # On regarde si c'est dans le contexte de satisfaction globale
-                                    all_text = " ".join([p.text for p in iter_all_paragraphs(doc)])
-                                    satisfaction_globale_index = all_text.find("niveau global de satisfaction")
-                                    current_index = all_text.find(texte)
-                                    if satisfaction_globale_index != -1 and current_index > satisfaction_globale_index:
-                                        checkbox_paras.append(("satisfaction_globale", "Satisfait", para))
-                                    else:
-                                        checkbox_paras.append(("deroulement", "Satisfait", para))
-                                elif "Moyennement satisfait" in texte:
-                                    # Même logique pour moyennement satisfait
-                                    all_text = " ".join([p.text for p in iter_all_paragraphs(doc)])
-                                    satisfaction_globale_index = all_text.find("niveau global de satisfaction")
-                                    current_index = all_text.find(texte)
-                                    if satisfaction_globale_index != -1 and current_index > satisfaction_globale_index:
-                                        checkbox_paras.append(("satisfaction_globale", "Moyennement satisfait", para))
-                                    else:
-                                        checkbox_paras.append(("deroulement", "Moyennement satisfait", para))
-                                elif "Très motivés" in texte:
-                                    # Distinguer motivation vs assiduité par contexte
-                                    all_text = " ".join([p.text for p in iter_all_paragraphs(doc)])
-                                    assidus_index = all_text.find("assidus")
-                                    current_index = all_text.find(texte)
-                                    if assidus_index != -1 and current_index > assidus_index and (current_index - assidus_index) < 200:
-                                        checkbox_paras.append(("assiduite", "Très motivés", para))
-                                    else:
-                                        checkbox_paras.append(("motivation", "Très motivés", para))
-                                elif "Motivés" in texte and "Très" not in texte and "Pas" not in texte:
-                                    # Même logique pour "Motivés"
-                                    all_text = " ".join([p.text for p in iter_all_paragraphs(doc)])
-                                    assidus_index = all_text.find("assidus")
-                                    current_index = all_text.find(texte)
-                                    if assidus_index != -1 and current_index > assidus_index and (current_index - assidus_index) < 200:
-                                        checkbox_paras.append(("assiduite", "Motivés", para))
-                                    else:
-                                        checkbox_paras.append(("motivation", "Motivés", para))
-                                elif "Pas motivés" in texte:
-                                    # Même logique pour "Pas motivés"
-                                    all_text = " ".join([p.text for p in iter_all_paragraphs(doc)])
-                                    assidus_index = all_text.find("assidus")
-                                    current_index = all_text.find(texte)
-                                    if assidus_index != -1 and current_index > assidus_index and (current_index - assidus_index) < 200:
-                                        checkbox_paras.append(("assiduite", "Pas motivés", para))
-                                    else:
-                                        checkbox_paras.append(("motivation", "Pas motivés", para))
-                                elif "Oui" in texte:
-                                    # Identifier le bon groupe pour "Oui"
-                                    all_text = " ".join([p.text for p in iter_all_paragraphs(doc)])
-                                    current_index = all_text.find(texte)
-                                    
-                                    # Chercher les mots-clés avant cette position
-                                    text_before = all_text[:current_index]
-                                    
-                                    if "homogène" in text_before[-200:]:
-                                        checkbox_paras.append(("homogeneite", "Oui", para))
-                                    elif "adaptation du déroulé" in text_before[-300:]:
-                                        checkbox_paras.append(("adaptation", "Oui", para))
-                                    elif "tenir à jour le fichier" in text_before[-300:]:
-                                        checkbox_paras.append(("suivi", "Oui", para))
-                                elif "Non" in texte and "concerné" not in texte and "Non satisfait" not in texte:
-                                    # Identifier le bon groupe pour "Non"
-                                    all_text = " ".join([p.text for p in iter_all_paragraphs(doc)])
-                                    current_index = all_text.find(texte)
-                                    text_before = all_text[:current_index]
-                                    
-                                    if "homogène" in text_before[-200:]:
-                                        checkbox_paras.append(("homogeneite", "Non", para))
-                                    elif "adaptation du déroulé" in text_before[-300:]:
-                                        checkbox_paras.append(("adaptation", "Non", para))
-                                    elif "tenir à jour le fichier" in text_before[-300:]:
-                                        checkbox_paras.append(("suivi", "Non", para))
-                                elif "Non concerné" in texte:
-                                    checkbox_paras.append(("suivi", "Non concerné", para))
 
-                        # Grouper les paragraphes par groupe
+                        for idx, para in enumerate(all_paras):
+                            texte = para.text.strip()
+                            # S’il y a un "☐" en tête, c’est une option de QCM
+                            if texte.startswith("☐"):
+                                # Récupérer le « texte d’option » sans le symbole
+                                option_label = texte.lstrip("☐").strip()
+
+                                # On tente de déterminer le groupe grâce au contexte
+                                # On regarde quelques paragraphes précédents pour trouver une phrase-guide
+                                context = ""
+                                for j in range(max(0, idx - 5), idx):
+                                    context += all_paras[j] + " "
+
+                                groupe_nom = None
+                                if "Déroulé de la formation" in context:
+                                    groupe_nom = "deroulement"
+                                elif "niveau global de satisfaction" in context:
+                                    groupe_nom = "satisfaction_globale"
+                                elif "étaient-ils motivés" in context or "motivés" in context:
+                                    groupe_nom = "motivation"
+                                elif "assidus" in context:
+                                    groupe_nom = "assiduite"
+                                elif "formation s’est avérée homogène" in context or "homogène" in context:
+                                    groupe_nom = "homogeneite"
+                                elif "répondre à toutes les questions" in context or "questions" in context:
+                                    groupe_nom = "questions"
+                                elif "adaptation du déroulé" in context:
+                                    groupe_nom = "adaptation"
+                                elif "tenir à jour le fichier" in context or "suivi" in context:
+                                    groupe_nom = "suivi"
+                                else:
+                                    # Fallback : si on ne trouve pas de mot-clé, on essaie de reconnaître
+                                    # le groupe par la simple présence d'une des options dans CHECKBOX_GROUPS
+                                    for g, opts in CHECKBOX_GROUPS.items():
+                                        if option_label in opts:
+                                            groupe_nom = g
+                                            break
+
+                                if groupe_nom:
+                                    checkbox_paras.append((groupe_nom, option_label, para))
+
+                        # Regrouper les paragraphes par groupe
                         group_to_paras = defaultdict(list)
-                        for groupe, opt, para in checkbox_paras:
-                            group_to_paras[groupe].append((opt, para))
+                        for groupe, opt_label, para in checkbox_paras:
+                            group_to_paras[groupe].append((opt_label, para))
 
-                        # Traitement des réponses
+                        # ----- TRAITEMENT DES RÉPONSES PAR GROUPE ----- #
                         for groupe, paras in group_to_paras.items():
-                            options_presentes = [opt for opt, _ in paras]
-                           
-                            # Déterminer l'option à cocher
+                            options_presentes = [opt_label for opt_label, _ in paras]
+
+                            # Si l’utilisateur a figé ce groupe, on prend directement la valeur figée
                             if groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
                             else:
-                                # Sélection aléatoire uniquement parmi les réponses positives
+                                # Sinon, on cherche les options « positives » pour ce groupe
                                 positives_disponibles = [
-                                    opt for opt in options_presentes
-                                    if groupe in POSITIVE_OPTIONS and opt in POSITIVE_OPTIONS[groupe]
+                                    opt_label for opt_label in options_presentes
+                                    if groupe in POSITIVE_OPTIONS and opt_label in POSITIVE_OPTIONS[groupe]
                                 ]
-                               
-                                # Si des positives sont disponibles, choisir aléatoirement parmi elles
                                 if positives_disponibles:
+                                    # Choix aléatoire parmi les positives
                                     option_choisie = random.choice(positives_disponibles)
                                 else:
-                                    # Si pas de positives disponibles, choisir aléatoirement parmi toutes
+                                    # Si pas de positive dispo, on pioche aléatoirement parmi toutes
                                     option_choisie = random.choice(options_presentes) if options_presentes else None
 
-                            # Appliquer le choix
+                            # Appliquer le choix : remplacer le symbole "☐" par "☑" sur l'option choisie
                             if option_choisie:
-                                for opt, para in paras:
-                                    for run in para.runs:
-                                        if "{{checkbox}}" in run.text:
-                                            run.text = run.text.replace(
-                                                "{{checkbox}}",
-                                                "☑" if opt == option_choisie else "☐"
-                                            )
+                                for opt_label, para in paras:
+                                    texte_actuel = para.text.strip()
+                                    # Supprimer d’abord toute case en début de ligne (☐ ou ☑)
+                                    bare = re.sub(r'^[☐☑]\s*', '', texte_actuel).strip()
+                                    if opt_label == option_choisie:
+                                        para.text = f"☑ {bare}"
+                                    else:
+                                        para.text = f"☐ {bare}"
 
-                        # Les sections pistes et observations sont déjà dans le template
-                        # Pas besoin de les ajouter
+                        # Les sections « pistes » et « observations » sont déjà présentes dans le template,
+                        # donc on ne les rajoute pas ici.
 
-                        # Enregistrement
+                        # Enregistrement du document pour chaque session
                         filename = f"Compte_Rendu_{session_id}.docx"
                         path = os.path.join(tmpdir, filename)
                         doc.save(path)
                         zipf.write(path, arcname=filename)
 
-                # Téléchargement
+                # Téléchargement de l’archive ZIP
                 with open(zip_path, "rb") as f:
                     st.success("Comptes rendus générés avec succès !")
                     st.download_button(
-                        "📅 Télécharger l'archive ZIP",
+                        "📅 Télécharger l’archive ZIP",
                         data=f,
                         file_name="QCM_Sessions.zip",
                         mime="application/zip"
