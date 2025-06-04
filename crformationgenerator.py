@@ -36,8 +36,8 @@ POSITIVE_OPTIONS = {
     "assiduite": ["Très motivés", "Motivés"],
     "homogeneite": ["Oui"],
     "questions": ["Toutes les questions", "A peu près toutes"],
-    "adaptation": ["Non"],
-    "suivi": ["Non concerné"]
+    "adaptation": ["Non"],            # on ne proposera plus que "Non"
+    "suivi": ["Non concerné"]         # on ne proposera plus que "Non concerné"
 }
 
 # Détection des blocs de checkbox
@@ -47,20 +47,18 @@ CHECKBOX_GROUPS = {
     "assiduite": ["Très motivés", "Motivés", "Pas motivés"],
     "homogeneite": ["Oui", "Non"],
     "questions": ["Toutes les questions", "A peu près toutes", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", "Je n'ai pas pu répondre à la majorité des questions"],
-    "adaptation": ["Oui", "Non"],
-    "suivi": ["Oui", "Non", "Non concerné"]
+    "adaptation": ["Oui", "Non"],            # le template peut rester inchangé, on cochera toujours "Non"
+    "suivi": ["Oui", "Non", "Non concerné"]   # le template peut rester inchangé, on cochera toujours "Non concerné"
 }
 
-# Fonction pour appliquer la logique conditionnelle
+# Fonction pour appliquer la logique conditionnelle (reste inchangée)
 def appliquer_logique_conditionnelle(reponses_figees):
-    # Si adaptation n'est pas figé, le mettre à "Non" par défaut
+    # Si adaptation n'est pas défini, le mettre à "Non" par défaut
     if "adaptation" not in reponses_figees:
         reponses_figees["adaptation"] = "Non"
-    
     # Si adaptation est "Non", forcer suivi à "Non concerné"
     if reponses_figees["adaptation"] == "Non":
         reponses_figees["suivi"] = "Non concerné"
-    
     return reponses_figees
 
 # Étape 1 : Importer les fichiers
@@ -82,38 +80,13 @@ if excel_file and word_file:
         sessions = df.groupby("session")
         reponses_figees = {}
 
-        st.markdown("### Etape 2 : Choisir les réponses à figer (facultatif)")
-        
-        # Section pour les questions d'adaptation et suivi
-        st.subheader("Questions d'adaptation et suivi")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Question d'adaptation avec valeur par défaut "Non"
-            choix_adaptation = st.radio(
-                "Avez-vous effectué une adaptation?",
-                ["Oui", "Non"],
-                index=1,  # "Non" par défaut
-                key="choix_adaptation"
-            )
-            reponses_figees["adaptation"] = choix_adaptation
-        
-        with col2:
-            # Question de suivi conditionnelle
-            if choix_adaptation == "Oui":
-                choix_suivi = st.radio(
-                    "Avez-vous mis à jour le fichier?",
-                    ["Oui", "Non"],
-                    index=0,  # "Oui" par défaut
-                    key="choix_suivi"
-                )
-                reponses_figees["suivi"] = choix_suivi
-            else:
-                # Valeur forcée à "Non concerné" si adaptation est "Non"
-                reponses_figees["suivi"] = "Non concerné"
-                st.info("Suivi: Non concerné (car pas d'adaptation)")
+        st.markdown("### Etape 2 : Figer systématiquement adaptation & suivi")
 
-        # Autres questions
+        # On fige directement adaptation et suivi sans interface
+        reponses_figees["adaptation"] = "Non"
+        reponses_figees["suivi"] = "Non concerné"
+
+        # On garde les autres questions avec possibilité de figer ou non
         st.subheader("Autres questions")
         autres_groupes = [g for g in CHECKBOX_GROUPS.keys() if g not in ["adaptation", "suivi"]]
         for groupe in autres_groupes:
@@ -126,9 +99,9 @@ if excel_file and word_file:
         observations = st.text_area("Autres observations :", key="obs")
 
         if st.button("🚀 Générer les comptes rendus"):
-            # Appliquer la logique conditionnelle
+            # Appliquer la logique conditionnelle (même si adaptation/suivi sont déjà définis)
             reponses_figees = appliquer_logique_conditionnelle(reponses_figees)
-            
+
             with tempfile.TemporaryDirectory() as tmpdir:
                 zip_path = os.path.join(tmpdir, "QCM_Sessions.zip")
                 with ZipFile(zip_path, 'w') as zipf:
@@ -191,7 +164,6 @@ if excel_file and word_file:
                                 for opt, para in paras:
                                     for run in para.runs:
                                         if "{{checkbox}}" in run.text:
-                                            # Remplacer "{{checkbox}}" par le symbole adéquat
                                             run.text = run.text.replace(
                                                 "{{checkbox}}",
                                                 "☑" if opt == option_choisie else "☐"
