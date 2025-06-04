@@ -19,7 +19,7 @@ def remplacer_placeholders(paragraph, replacements):
                 if key in run.text:
                     run.text = run.text.replace(key, val)
 
-# Fonction pour itérer sur tous les paragraphes
+# Fonction pour itérer sur tous les paragraphes (y compris ceux dans les tableaux)
 def iter_all_paragraphs(doc):
     for para in doc.paragraphs:
         yield para
@@ -61,8 +61,11 @@ if excel_file and word_file:
     df = pd.read_excel(excel_file)
     df.columns = df.columns.str.strip()
 
-    if not set(["session", "formateur", "formation", "nb d'heure", "Nom", "Prénom"]).issubset(df.columns):
-        st.error("Colonnes manquantes dans le fichier Excel.")
+    # Vérification des colonnes obligatoires
+    required_columns = ["session", "formateur", "formation", "nb d'heure", "Nom", "Prénom"]
+    if not set(required_columns).issubset(df.columns):
+        st.error(f"Colonnes manquantes dans le fichier Excel. Colonnes requises : {required_columns}")
+        st.info(f"Colonnes disponibles : {list(df.columns)}")
     else:
         sessions = df.groupby("session")
         reponses_figees = {}
@@ -84,26 +87,38 @@ if excel_file and word_file:
                     for session_id, participants in sessions:
                         doc = Document(word_file)
                         first = participants.iloc[0]
+
+                        # On suppose que votre modèle Word utilise :
+                        #   {{nom}}        pour le nom de famille
+                        #   {{prénom}}     pour le prénom
+                        #   {{formateur}}  pour le nom complet (optionnel)
+                        #   {{ref_session}} pour la référence de session
+                        #   {{formation_dispensee}} pour la formation
+                        #   {{duree_formation}} pour le nombre d'heures
+                        #   {{nb_participants}} pour le nombre de participants
                         replacements = {
-                            "{{formateur}}": str(first["formateur"]),
+                            "{{nom}}": str(first["Nom"]),
+                            "{{prénom}}": str(first["Prénom"]),
+                            "{{formateur}}": f"{first['Prénom']} {first['Nom']}",
                             "{{ref_session}}": str(session_id),
                             "{{formation_dispensee}}": str(first["formation"]),
                             "{{duree_formation}}": str(first["nb d'heure"]),
                             "{{nb_participants}}": str(len(participants))
                         }
-                       
-                        # Remplacement des placeholders
+
+                        # Remplacement des placeholders dans tout le document
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
-                        # Collecte des paragraphes avec checkbox
+                        # Collecte des paragraphes contenant le placeholder "{{checkbox}}"
+                        # et correspondant à une option QCM
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
                                 texte = re.sub(r'\s+', ' ', para.text).strip()
                                 for groupe, options in CHECKBOX_GROUPS.items():
                                     for opt in options:
-                                        if re.search(rf'\b{re.escape(opt)}\b', texte):
+                                        if re.search(rf"\b{re.escape(opt)}\b", texte):
                                             checkbox_paras.append((groupe, opt, para))
                                             break
                                     else:
@@ -115,25 +130,21 @@ if excel_file and word_file:
                         for groupe, opt, para in checkbox_paras:
                             group_to_paras[groupe].append((opt, para))
 
-                        # Traitement des réponses
+                        # Traitement des réponses : cocher (☑) ou décocher (☐)
                         for groupe, paras in group_to_paras.items():
                             options_presentes = [opt for opt, _ in paras]
-                           
+
                             # Déterminer l'option à cocher
                             if groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
                             else:
-                                # Sélection aléatoire uniquement parmi les réponses positives
                                 positives_disponibles = [
                                     opt for opt in options_presentes
                                     if groupe in POSITIVE_OPTIONS and opt in POSITIVE_OPTIONS[groupe]
                                 ]
-                               
-                                # Si des positives sont disponibles, choisir aléatoirement parmi elles
                                 if positives_disponibles:
                                     option_choisie = random.choice(positives_disponibles)
                                 else:
-                                    # Si pas de positives disponibles, choisir aléatoirement parmi toutes
                                     option_choisie = random.choice(options_presentes) if options_presentes else None
 
                             # Appliquer le choix
@@ -141,22 +152,23 @@ if excel_file and word_file:
                                 for opt, para in paras:
                                     for run in para.runs:
                                         if "{{checkbox}}" in run.text:
+                                            # Remplacer "{{checkbox}}" par le symbole adéquat
                                             run.text = run.text.replace(
                                                 "{{checkbox}}",
                                                 "☑" if opt == option_choisie else "☐"
                                             )
 
-                        # Ajout des sections supplémentaires
+                        # Ajout des sections "Avis & pistes d'amélioration" et "Autres observations"
                         doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
                         doc.add_paragraph("\nAutres observations :\n" + observations)
 
-                        # Enregistrement
+                        # Enregistrement du document pour chaque session
                         filename = f"Compte_Rendu_{session_id}.docx"
                         path = os.path.join(tmpdir, filename)
                         doc.save(path)
                         zipf.write(path, arcname=filename)
 
-                # Téléchargement
+                # Téléchargement de l'archive ZIP
                 with open(zip_path, "rb") as f:
                     st.success("Comptes rendus générés avec succès !")
                     st.download_button(
