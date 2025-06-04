@@ -5,6 +5,7 @@ import os
 import tempfile
 from zipfile import ZipFile
 import random
+import re
 from collections import defaultdict
 
 st.set_page_config(page_title="Générateur de QCM par session", layout="centered")
@@ -12,16 +13,13 @@ st.title("📄 Générateur de QCM par session (figé ou aléatoire)")
 
 # Fonction de remplacement des balises
 def remplacer_placeholders(paragraph, replacements):
-    for key in replacements:
+    for key, val in replacements.items():
         if key in paragraph.text:
-            full_text = paragraph.text
-            while key in full_text:
-                for run in paragraph.runs:
-                    if key in run.text:
-                        run.text = run.text.replace(key, replacements[key])
-                full_text = full_text.replace(key, replacements[key], 1)
+            for run in paragraph.runs:
+                if key in run.text:
+                    run.text = run.text.replace(key, val)
 
-# Fonction pour itérer sur tous les paragraphes
+# Fonction pour itérer sur tous les paragraphes (y compris ceux dans les tableaux)
 def iter_all_paragraphs(doc):
     for para in doc.paragraphs:
         yield para
@@ -31,128 +29,157 @@ def iter_all_paragraphs(doc):
                 for para in cell.paragraphs:
                     yield para
 
-# Constantes
+# Définition des réponses positives pour chaque groupe
 POSITIVE_OPTIONS = {
     "satisfaction": ["Très satisfait", "Satisfait"],
     "motivation": ["Très motivés", "Motivés"],
     "assiduite": ["Très motivés", "Motivés"],
     "homogeneite": ["Oui"],
     "questions": ["Toutes les questions", "A peu près toutes"],
+    "adaptation": ["Oui"],
+    "suivi": ["Oui"]
 }
 
+# Détection des blocs de checkbox
 CHECKBOX_GROUPS = {
+    "satisfaction": ["Très satisfait", "Satisfait", "Moyennement satisfait", "Insatisfait", "Non satisfait"],
     "motivation": ["Très motivés", "Motivés", "Pas motivés"],
     "assiduite": ["Très motivés", "Motivés", "Pas motivés"],
     "homogeneite": ["Oui", "Non"],
-    "questions": ["Toutes les questions", "A peu près toutes", "Il y a quelques sujets", "Je n'ai pas pu répondre"],
+    "questions": ["Toutes les questions", "A peu près toutes", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", "Je n'ai pas pu répondre à la majorité des questions"],
     "adaptation": ["Oui", "Non"],
-    "suivi": ["Oui", "Non", "Non concerné"],
-    "satisfaction": ["Très satisfait", "Satisfait", "Moyennement satisfait", "Insatisfait", "Non satisfait"]
+    "suivi": ["Oui", "Non", "Non concerné"]
 }
 
-# Interface utilisateur
-with st.expander("1. Importer les fichiers", expanded=True):
+# Étape 1 : Importer les fichiers
+with st.expander("Etape 1 : Importer les fichiers", expanded=True):
     excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
-    word_file = st.file_uploader("Modèle Word (.docx)", type="docx")
+    word_file = st.file_uploader("Modèle Word du compte rendu", type="docx")
 
+# Traitement
 if excel_file and word_file:
     df = pd.read_excel(excel_file)
     df.columns = df.columns.str.strip()
-    
+
+    # Vérification des colonnes obligatoires
     required_columns = ["session", "formateur", "formation", "nb d'heure", "Nom", "Prénom"]
     if not set(required_columns).issubset(df.columns):
-        st.error(f"Colonnes manquantes. Requises : {required_columns}")
+        st.error(f"Colonnes manquantes dans le fichier Excel. Colonnes requises : {required_columns}")
         st.info(f"Colonnes disponibles : {list(df.columns)}")
     else:
+        sessions = df.groupby("session")
         reponses_figees = {}
 
-        st.markdown("### 2. Réponses à figer (facultatif)")
-        for groupe in CHECKBOX_GROUPS:
-            if groupe in ["adaptation", "suivi"]:
-                continue
-            if st.checkbox(f"Figer : {groupe}", key=f"fig_{groupe}"):
-                choix = st.selectbox(
-                    f"Réponse pour {groupe}",
-                    CHECKBOX_GROUPS[groupe],
-                    key=f"sel_{groupe}"
-                )
+        st.markdown("### Etape 2 : Choisir les réponses à figer (facultatif)")
+        for groupe, options in CHECKBOX_GROUPS.items():
+            figer = st.checkbox(f"Figer la réponse pour : {groupe}", key=f"figer_{groupe}")
+            if figer:
+                choix = st.selectbox(f"Choix figé pour {groupe}", options, key=f"choix_{groupe}")
                 reponses_figees[groupe] = choix
 
-        pistes = st.text_area("Avis & pistes d'amélioration")
-        obs = st.text_area("Autres observations")
+        pistes = st.text_area("Avis & pistes d'amélioration :", key="pistes")
+        observations = st.text_area("Autres observations :", key="obs")
 
         if st.button("🚀 Générer les comptes rendus"):
             with tempfile.TemporaryDirectory() as tmpdir:
-                zip_path = os.path.join(tmpdir, "QCM.zip")
+                zip_path = os.path.join(tmpdir, "QCM_Sessions.zip")
                 with ZipFile(zip_path, 'w') as zipf:
-                    for session_id, participants in df.groupby("session"):
+                    for session_id, participants in sessions:
                         doc = Document(word_file)
                         first = participants.iloc[0]
 
-                        # Remplacements généraux
-                        remplacements = {
-                            "{{nom}}": first["Nom"],
-                            "{{prénom}}": first["Prénom"],
+                        # On suppose que votre modèle Word utilise :
+                        #   {{nom}}        pour le nom de famille
+                        #   {{prénom}}     pour le prénom
+                        #   {{formateur}}  pour le nom complet (optionnel)
+                        #   {{ref_session}} pour la référence de session
+                        #   {{formation_dispensee}} pour la formation
+                        #   {{duree_formation}} pour le nombre d'heures
+                        #   {{nb_participants}} pour le nombre de participants
+                        replacements = {
+                            "{{nom}}": str(first["Nom"]),
+                            "{{prénom}}": str(first["Prénom"]),
+                            "{{formateur}}": f"{first['Prénom']} {first['Nom']}",
                             "{{ref_session}}": str(session_id),
-                            "{{formation_dispensee}}": first["formation"],
+                            "{{formation_dispensee}}": str(first["formation"]),
                             "{{duree_formation}}": str(first["nb d'heure"]),
                             "{{nb_participants}}": str(len(participants))
                         }
 
-                        # Appliquer les remplacements
+                        # Remplacement des placeholders dans tout le document
                         for para in iter_all_paragraphs(doc):
-                            remplacer_placeholders(para, remplacements)
+                            remplacer_placeholders(para, replacements)
 
-                        # Collecte des checkboxes
+                        # Collecte des paragraphes contenant le placeholder "{{checkbox}}"
+                        # et correspondant à une option QCM
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
-                                texte_brut = para.text.lower().replace(" ", "").replace(" ", "")
+                                texte = re.sub(r'\s+', ' ', para.text).strip()
                                 for groupe, options in CHECKBOX_GROUPS.items():
                                     for opt in options:
-                                        if opt.lower().replace(" ", "") in texte_brut:
+                                        if re.search(rf"\b{re.escape(opt)}\b", texte):
                                             checkbox_paras.append((groupe, opt, para))
                                             break
                                     else:
                                         continue
                                     break
 
-                        # Regrouper par groupe
+                        # Grouper les paragraphes par groupe
                         group_to_paras = defaultdict(list)
                         for groupe, opt, para in checkbox_paras:
                             group_to_paras[groupe].append((opt, para))
 
-                        # Appliquer les réponses
+                        # Traitement des réponses : cocher (☑) ou décocher (☐)
                         for groupe, paras in group_to_paras.items():
-                            if groupe == "adaptation":
+                            options_presentes = [opt for opt, _ in paras]
+
+                            # 1) Forcer "Non" pour "adaptation" si présent
+                            if groupe == "adaptation" and "Non" in options_presentes:
                                 option_choisie = "Non"
-                            elif groupe == "suivi":
+                            # 2) Forcer "Non concerné" pour "suivi" si présent
+                            elif groupe == "suivi" and "Non concerné" in options_presentes:
                                 option_choisie = "Non concerné"
+                            # 3) Si l’utilisateur a figé le choix dans l’interface
                             elif groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
+                            # 4) Sinon, logique aléatoire : priorité aux "positives", sinon au hasard
                             else:
-                                positives = [
-                                    opt for opt, _ in paras
+                                positives_disponibles = [
+                                    opt for opt in options_presentes
                                     if groupe in POSITIVE_OPTIONS and opt in POSITIVE_OPTIONS[groupe]
                                 ]
-                                option_choisie = random.choice(positives) if positives else random.choice([opt for opt, _ in paras])
+                                if positives_disponibles:
+                                    option_choisie = random.choice(positives_disponibles)
+                                else:
+                                    option_choisie = random.choice(options_presentes) if options_presentes else None
 
-                            # Appliquer le choix
-                            for opt, para in paras:
-                                for run in para.runs:
-                                    if "{{checkbox}}" in run.text:
-                                        run.text = run.text.replace("{{checkbox}}", "☑" if opt == option_choisie else "☐")
+                            # Appliquer le choix : remplacer {{checkbox}} par ☑ ou ☐
+                            if option_choisie:
+                                for opt, para in paras:
+                                    for run in para.runs:
+                                        if "{{checkbox}}" in run.text:
+                                            run.text = run.text.replace(
+                                                "{{checkbox}}",
+                                                "☑" if opt == option_choisie else "☐"
+                                            )
 
-                        # Ajouter les commentaires
-                        doc.add_paragraph("\nAvis & piste d'amélioration de la formation :\n" + pistes)
-                        doc.add_paragraph("\nAutres observations (Exprimez-vous librement) :\n" + obs)
+                        # Ajout des sections "Avis & pistes d'amélioration" et "Autres observations"
+                        doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
+                        doc.add_paragraph("\nAutres observations :\n" + observations)
 
-                        # Sauvegarder
-                        path = os.path.join(tmpdir, f"CR_{session_id}.docx")
+                        # Enregistrement du document pour chaque session
+                        filename = f"Compte_Rendu_{session_id}.docx"
+                        path = os.path.join(tmpdir, filename)
                         doc.save(path)
-                        zipf.write(path, arcname=f"CR_{session_id}.docx")
+                        zipf.write(path, arcname=filename)
 
-                # Téléchargement
+                # Téléchargement de l'archive ZIP
                 with open(zip_path, "rb") as f:
-                    st.success("✅ Fichiers générés !")
-                    st.download_button("📥 Télécharger ZIP", f, "QCM.zip", "application/zip")
+                    st.success("Comptes rendus générés avec succès !")
+                    st.download_button(
+                        "📅 Télécharger l'archive ZIP",
+                        data=f,
+                        file_name="QCM_Sessions.zip",
+                        mime="application/zip"
+                    )
