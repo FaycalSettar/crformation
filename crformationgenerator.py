@@ -51,6 +51,10 @@ CHECKBOX_GROUPS = {
     "suivi": ["Oui", "Non", "Non concerné"]  # Groupe pour la question de suivi
 }
 
+# Textes clés pour les questions spécifiques
+QUESTION_ADAPTATION = "Avez-vous effectué une quelconque adaptation du déroulé"
+QUESTION_SUIVI = "Si oui, avez-vous pensé à tenir à jour le fichier de suivi"
+
 # Étape 1 : Importer les fichiers
 with st.expander("Etape 1 : Importer les fichiers", expanded=True):
     excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
@@ -115,34 +119,31 @@ if excel_file and word_file:
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
-                        # Nouvelle méthode de détection des groupes
-                        # Nous allons d'abord trouver les paragraphes contenant les textes clés des questions
-                        group_questions = {
-                            "adaptation": "adaptation du déroulé",
-                            "suivi": "fichier de suivi"
-                        }
+                        # Collecte de tous les paragraphes dans une liste pour un accès séquentiel
+                        all_paragraphs = list(iter_all_paragraphs(doc))
                         
-                        # Créer un mapping des paragraphes aux groupes
+                        # Créer un mapping des paragraphes aux groupes pour les questions spécifiques
                         para_to_group = {}
-                        for para in iter_all_paragraphs(doc):
+                        current_group = None
+                        
+                        for para in all_paragraphs:
                             text = para.text.lower()
-                            for group, keyword in group_questions.items():
-                                if keyword in text:
-                                    # Trouver tous les paragraphes suivants jusqu'à la prochaine question
-                                    current_para = para
-                                    while current_para:
-                                        next_para = current_para.next_paragraph
-                                        if next_para and "{{checkbox}}" in next_para.text:
-                                            para_to_group[next_para] = group
-                                        elif next_para and any(kw in next_para.text.lower() for kw in group_questions.values()):
-                                            break
-                                        current_para = next_para
-
+                            
+                            # Détection des questions spécifiques
+                            if QUESTION_ADAPTATION.lower() in text:
+                                current_group = "adaptation"
+                            elif QUESTION_SUIVI.lower() in text:
+                                current_group = "suivi"
+                            elif "{{checkbox}}" in para.text:
+                                # Si nous sommes dans un groupe spécifique, assigner le groupe
+                                if current_group:
+                                    para_to_group[para] = current_group
+                        
                         # Collecte des paragraphes contenant le placeholder "{{checkbox}}"
                         checkbox_paras = []
-                        for para in iter_all_paragraphs(doc):
+                        for para in all_paragraphs:
                             if "{{checkbox}}" in para.text:
-                                # Vérifier si nous avons déjà associé ce paragraphe à un groupe
+                                # Vérifier si nous avons déjà associé ce paragraphe à un groupe spécifique
                                 group = para_to_group.get(para)
                                 
                                 if not group:
