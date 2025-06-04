@@ -51,6 +51,18 @@ CHECKBOX_GROUPS = {
     "suivi": ["Oui", "Non", "Non concerné"]
 }
 
+# Fonction pour appliquer la logique conditionnelle
+def appliquer_logique_conditionnelle(reponses_figees):
+    # Si adaptation n'est pas figé, le mettre à "Non" par défaut
+    if "adaptation" not in reponses_figees:
+        reponses_figees["adaptation"] = "Non"
+    
+    # Si adaptation est "Non", forcer suivi à "Non concerné"
+    if reponses_figees["adaptation"] == "Non":
+        reponses_figees["suivi"] = "Non concerné"
+    
+    return reponses_figees
+
 # Étape 1 : Importer les fichiers
 with st.expander("Etape 1 : Importer les fichiers", expanded=True):
     excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
@@ -71,16 +83,52 @@ if excel_file and word_file:
         reponses_figees = {}
 
         st.markdown("### Etape 2 : Choisir les réponses à figer (facultatif)")
-        for groupe, options in CHECKBOX_GROUPS.items():
+        
+        # Section pour les questions d'adaptation et suivi
+        st.subheader("Questions d'adaptation et suivi")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Question d'adaptation avec valeur par défaut "Non"
+            choix_adaptation = st.radio(
+                "Avez-vous effectué une adaptation?",
+                ["Oui", "Non"],
+                index=1,  # "Non" par défaut
+                key="choix_adaptation"
+            )
+            reponses_figees["adaptation"] = choix_adaptation
+        
+        with col2:
+            # Question de suivi conditionnelle
+            if choix_adaptation == "Oui":
+                choix_suivi = st.radio(
+                    "Avez-vous mis à jour le fichier?",
+                    ["Oui", "Non"],
+                    index=0,  # "Oui" par défaut
+                    key="choix_suivi"
+                )
+                reponses_figees["suivi"] = choix_suivi
+            else:
+                # Valeur forcée à "Non concerné" si adaptation est "Non"
+                reponses_figees["suivi"] = "Non concerné"
+                st.info("Suivi: Non concerné (car pas d'adaptation)")
+
+        # Autres questions
+        st.subheader("Autres questions")
+        autres_groupes = [g for g in CHECKBOX_GROUPS.keys() if g not in ["adaptation", "suivi"]]
+        for groupe in autres_groupes:
             figer = st.checkbox(f"Figer la réponse pour : {groupe}", key=f"figer_{groupe}")
             if figer:
-                choix = st.selectbox(f"Choix figé pour {groupe}", options, key=f"choix_{groupe}")
+                choix = st.selectbox(f"Choix figé pour {groupe}", CHECKBOX_GROUPS[groupe], key=f"choix_{groupe}")
                 reponses_figees[groupe] = choix
 
         pistes = st.text_area("Avis & pistes d'amélioration :", key="pistes")
         observations = st.text_area("Autres observations :", key="obs")
 
         if st.button("🚀 Générer les comptes rendus"):
+            # Appliquer la logique conditionnelle
+            reponses_figees = appliquer_logique_conditionnelle(reponses_figees)
+            
             with tempfile.TemporaryDirectory() as tmpdir:
                 zip_path = os.path.join(tmpdir, "QCM_Sessions.zip")
                 with ZipFile(zip_path, 'w') as zipf:
@@ -88,14 +136,6 @@ if excel_file and word_file:
                         doc = Document(word_file)
                         first = participants.iloc[0]
 
-                        # On suppose que votre modèle Word utilise :
-                        #   {{nom}}        pour le nom de famille
-                        #   {{prénom}}     pour le prénom
-                        #   {{formateur}}  pour le nom complet (optionnel)
-                        #   {{ref_session}} pour la référence de session
-                        #   {{formation_dispensee}} pour la formation
-                        #   {{duree_formation}} pour le nombre d'heures
-                        #   {{nb_participants}} pour le nombre de participants
                         replacements = {
                             "{{nom}}": str(first["Nom"]),
                             "{{prénom}}": str(first["Prénom"]),
@@ -111,7 +151,6 @@ if excel_file and word_file:
                             remplacer_placeholders(para, replacements)
 
                         # Collecte des paragraphes contenant le placeholder "{{checkbox}}"
-                        # et correspondant à une option QCM
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
@@ -159,8 +198,10 @@ if excel_file and word_file:
                                             )
 
                         # Ajout des sections "Avis & pistes d'amélioration" et "Autres observations"
-                        doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
-                        doc.add_paragraph("\nAutres observations :\n" + observations)
+                        if pistes.strip():
+                            doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
+                        if observations.strip():
+                            doc.add_paragraph("\nAutres observations :\n" + observations)
 
                         # Enregistrement du document pour chaque session
                         filename = f"Compte_Rendu_{session_id}.docx"
