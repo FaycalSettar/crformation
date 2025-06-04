@@ -36,20 +36,17 @@ POSITIVE_OPTIONS = {
     "assiduite": ["Très motivés", "Motivés"],
     "homogeneite": ["Oui"],
     "questions": ["Toutes les questions", "A peu près toutes"],
-    # Les deux lignes suivantes sont conservées mais non utilisées (réponses forcées)
-    "adaptation": ["Oui"],  
-    "suivi": ["Non concerné"]  
 }
 
 # Détection des blocs de checkbox
 CHECKBOX_GROUPS = {
-    "satisfaction": ["Très satisfait", "Satisfait", "Moyennement satisfait", "Insatisfait", "Non satisfait"],
     "motivation": ["Très motivés", "Motivés", "Pas motivés"],
     "assiduite": ["Très motivés", "Motivés", "Pas motivés"],
     "homogeneite": ["Oui", "Non"],
     "questions": ["Toutes les questions", "A peu près toutes", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", "Je n'ai pas pu répondre à la majorité des questions"],
     "adaptation": ["Oui", "Non"],
-    "suivi": ["Oui", "Non", "Non concerné"]
+    "suivi": ["Oui", "Non", "Non concerné"],
+    "satisfaction": ["Très satisfait", "Satisfait", "Moyennement satisfait", "Insatisfait", "Non satisfait"]
 }
 
 # Étape 1 : Importer les fichiers
@@ -96,7 +93,6 @@ if excel_file and word_file:
                         replacements = {
                             "{{nom}}": str(first["Nom"]),
                             "{{prénom}}": str(first["Prénom"]),
-                            "{{formateur}}": f"{first['Prénom']} {first['Nom']}",
                             "{{ref_session}}": str(session_id),
                             "{{formation_dispensee}}": str(first["formation"]),
                             "{{duree_formation}}": str(first["nb d'heure"]),
@@ -158,8 +154,8 @@ if excel_file and word_file:
                                             )
 
                         # Ajout des sections finales
-                        doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
-                        doc.add_paragraph("\nAutres observations :\n" + observations)
+                        doc.add_paragraph("\nAvis & piste d'amélioration de la formation :\n" + pistes)
+                        doc.add_paragraph("\nAutres observations (Exprimez-vous librement) :\n" + observations)
 
                         # Enregistrement
                         filename = f"Compte_Rendu_{session_id}.docx"
