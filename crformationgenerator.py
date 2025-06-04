@@ -143,30 +143,39 @@ if excel_file and word_file:
                         # 2) On détecte et on regroupe les "{{checkbox}}"
                         #      en se basant sur la question située juste au-dessus
                         # ------------------------------
+                        # On crée d'abord une liste linéaire de tous les paragraphes
+                        # (racine puis tableaux) dans l'ordre d'apparition du document.
+                        all_paras = []
+                        for para in doc.paragraphs:
+                            all_paras.append(para)
+                        for table in doc.tables:
+                            for row in table.rows:
+                                for cell in row.cells:
+                                    for para in cell.paragraphs:
+                                        all_paras.append(para)
+
                         group_to_paras = defaultdict(list)
 
-                        # --- On parcourt les paragraphes de la racine (doc.paragraphs) ---
-                        for i, para in enumerate(doc.paragraphs):
+                        # --- On parcourt tous les paragraphes en maintenant un index ---
+                        for idx, para in enumerate(all_paras):
                             if "{{checkbox}}" in para.text:
                                 # On cherche le paragraphe-question le plus proche au-dessus
-                                j = i - 1
+                                j = idx - 1
                                 while j >= 0:
-                                    txt_j = doc.paragraphs[j].text.strip().lower()
-                                    # On ignore les lignes vides ou contenant déjà "{{checkbox}}"
-                                    if (not txt_j) or ("{{checkbox}}" in txt_j):
+                                    header_text = all_paras[j].text.strip().lower()
+                                    if (not header_text) or ("{{checkbox}}" in header_text):
                                         j -= 1
                                     else:
                                         break
 
                                 if j < 0:
-                                    # Aucun header-question trouvé
+                                    # Aucun header-question trouvé : on l'ignore
                                     continue
 
-                                header = doc.paragraphs[j].text.strip().lower()
+                                header = all_paras[j].text.strip().lower()
 
                                 # Détermination du groupe selon des mots-clés dans l'en-tête
                                 groupe = None
-                                # Ordre de priorité pour éviter les ambiguïtés "adaptation" vs "suivi"
                                 if "motiv" in header:
                                     groupe = "motivation"
                                 elif "assid" in header:
@@ -179,6 +188,9 @@ if excel_file and word_file:
                                     groupe = "adaptation"
                                 elif "questions" in header:
                                     groupe = "questions"
+                                elif "déroul" in header or "deroul" in header:
+                                    # On reconnaît "Déroulé de la formation" → groupe "satisfaction"
+                                    groupe = "satisfaction"
                                 elif "satisfaction" in header:
                                     groupe = "satisfaction"
                                 # (On peut ajouter d’autres règles si besoin)
