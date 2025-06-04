@@ -107,10 +107,11 @@ if excel_file and word_file:
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
-                                texte = re.sub(r'\s+', ' ', para.text).strip()
+                                texte = para.text.strip()
+                                # Recherche simple sans regex
                                 for groupe, options in CHECKBOX_GROUPS.items():
                                     for opt in options:
-                                        if re.search(rf"\b{re.escape(opt)}\b", texte):
+                                        if opt in texte:
                                             checkbox_paras.append((groupe, opt, para))
                                             break
                                     else:
@@ -148,6 +149,7 @@ if excel_file and word_file:
                                 for opt, para in paras:
                                     for run in para.runs:
                                         if "{{checkbox}}" in run.text:
+                                            # Remplacer "{{checkbox}}" par le symbole adéquat
                                             run.text = run.text.replace(
                                                 "{{checkbox}}",
                                                 "☑" if opt == option_choisie else "☐"
