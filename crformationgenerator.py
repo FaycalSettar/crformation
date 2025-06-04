@@ -31,7 +31,8 @@ def iter_all_paragraphs(doc):
 
 # Définition des réponses positives pour chaque groupe
 POSITIVE_OPTIONS = {
-    "satisfaction": ["Très satisfait", "Satisfait"],
+    "satisfaction_globale": ["Très satisfait", "Satisfait"],
+    "satisfaction_deroulement": ["Très satisfait", "Satisfait"],
     "motivation": ["Très motivés", "Motivés"],
     "assiduite": ["Très motivés", "Motivés"],
     "homogeneite": ["Oui"],
@@ -42,11 +43,12 @@ POSITIVE_OPTIONS = {
 
 # Détection des blocs de checkbox
 CHECKBOX_GROUPS = {
-    "satisfaction": ["Très satisfait", "Satisfait", "Moyennement satisfait", "Insatisfait", "Non satisfait"],
+    "satisfaction_globale": ["Très satisfait", "Satisfait", "Moyennement satisfait", "Insatisfait", "Non satisfait"],
+    "satisfaction_deroulement": ["Très satisfait", "Satisfait", "Moyennement satisfait", "Non satisfait"],
     "motivation": ["Très motivés", "Motivés", "Pas motivés"],
     "assiduite": ["Très motivés", "Motivés", "Pas motivés"],
     "homogeneite": ["Oui", "Non"],
-    "questions": ["Toutes les questions", "A peu près toutes", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", "Je n'ai pas pu répondre à la majorité des questions"],
+    "questions": ["Toutes les questions", "A peu près tounes", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", "Je n'ai pas pu répondre à la majorité des questions"],
     "adaptation": ["Oui", "Non"],
     "suivi": ["Oui", "Non", "Non concerné"]
 }
@@ -130,14 +132,35 @@ if excel_file and word_file:
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
                                 texte = re.sub(r'\s+', ' ', para.text).strip()
-                                for groupe, options in CHECKBOX_GROUPS.items():
-                                    for opt in options:
-                                        if re.search(rf"\b{re.escape(opt)}\b", texte):
-                                            checkbox_paras.append((groupe, opt, para))
+                                
+                                # Détection spécifique par contexte pour éviter les confusions
+                                if "niveau global de satisfaction" in para.text or "niveau global de satisfaction" in str(para._element.getprevious()):
+                                    groupe_detecte = "satisfaction_globale"
+                                elif "Déroulé de la formation" in para.text or any("Déroulé de la formation" in str(p.text) for p in doc.paragraphs if doc.paragraphs.index(p) < doc.paragraphs.index(para) and doc.paragraphs.index(p) > doc.paragraphs.index(para) - 5):
+                                    groupe_detecte = "satisfaction_deroulement"
+                                elif "adaptation du déroulé" in texte.lower():
+                                    groupe_detecte = "adaptation"
+                                elif "fichier de suivi" in texte.lower():
+                                    groupe_detecte = "suivi"
+                                else:
+                                    # Détection classique pour les autres groupes
+                                    groupe_detecte = None
+                                    for groupe, options in CHECKBOX_GROUPS.items():
+                                        if groupe in ["satisfaction_globale", "satisfaction_deroulement"]:
+                                            continue  # Déjà gérés ci-dessus
+                                        for opt in options:
+                                            if re.search(rf"\b{re.escape(opt)}\b", texte):
+                                                groupe_detecte = groupe
+                                                break
+                                        if groupe_detecte:
                                             break
-                                    else:
-                                        continue
-                                    break
+                                
+                                # Ajouter le paragraphe avec son groupe détecté
+                                if groupe_detecte:
+                                    for opt in CHECKBOX_GROUPS[groupe_detecte]:
+                                        if re.search(rf"\b{re.escape(opt)}\b", texte):
+                                            checkbox_paras.append((groupe_detecte, opt, para))
+                                            break
 
                         # Grouper les paragraphes par groupe
                         group_to_paras = defaultdict(list)
