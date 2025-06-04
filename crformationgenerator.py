@@ -53,6 +53,88 @@ CHECKBOX_GROUPS = {
     "satisfaction_globale": ["Très satisfait", "Satisfait", "Moyennement satisfait", "Insatisfait", "Non satisfait"]
 }
 
+# Fonction pour traiter les checkbox avec format {{checkbox}}
+def traiter_checkbox_placeholders(doc, reponses_figees):
+    all_paras = list(iter_all_paragraphs(doc))
+    
+    for para in all_paras:
+        texte = para.text
+        
+        # Chercher les patterns avec {{checkbox}} pour "Déroulé de la formation"
+        if "Déroulé de la formation" in texte and "{{checkbox}}" in texte:
+            # Déterminer quelle option choisir
+            if "deroulement" in reponses_figees:
+                option_choisie = reponses_figees["deroulement"]
+            else:
+                # Choisir aléatoirement parmi les options positives
+                positives = POSITIVE_OPTIONS["deroulement"]
+                option_choisie = random.choice(positives)
+            
+            # Remplacer les {{checkbox}} par ☑ pour l'option choisie et ☐ pour les autres
+            nouveau_texte = texte
+            for option in CHECKBOX_GROUPS["deroulement"]:
+                if option == option_choisie:
+                    # Remplacer {{checkbox}} par ☑ pour l'option choisie
+                    pattern = r'\{\{checkbox\}\}' + re.escape(option)
+                    nouveau_texte = re.sub(pattern, f"☑ {option}", nouveau_texte)
+                else:
+                    # Remplacer {{checkbox}} par ☐ pour les autres options
+                    pattern = r'\{\{checkbox\}\}' + re.escape(option)
+                    nouveau_texte = re.sub(pattern, f"☐ {option}", nouveau_texte)
+            
+            # Appliquer le nouveau texte au paragraphe
+            para.text = nouveau_texte
+        
+        # Traiter les autres groupes avec le même pattern si nécessaire
+        for groupe, options in CHECKBOX_GROUPS.items():
+            if groupe == "deroulement":  # Déjà traité ci-dessus
+                continue
+                
+            # Vérifier si ce paragraphe contient des checkbox pour ce groupe
+            if "{{checkbox}}" in texte:
+                # Déterminer le contexte pour identifier le groupe
+                contexte_trouve = False
+                
+                if groupe == "motivation" and ("motivés" in texte or "motivation" in texte):
+                    contexte_trouve = True
+                elif groupe == "assiduite" and "assidus" in texte:
+                    contexte_trouve = True
+                elif groupe == "homogeneite" and "homogène" in texte:
+                    contexte_trouve = True
+                elif groupe == "questions" and "questions" in texte:
+                    contexte_trouve = True
+                elif groupe == "adaptation" and "adaptation" in texte:
+                    contexte_trouve = True
+                elif groupe == "suivi" and "suivi" in texte:
+                    contexte_trouve = True
+                elif groupe == "satisfaction_globale" and ("satisfaction" in texte or "satisfait" in texte):
+                    contexte_trouve = True
+                
+                if contexte_trouve:
+                    # Déterminer quelle option choisir
+                    if groupe in reponses_figees:
+                        option_choisie = reponses_figees[groupe]
+                    else:
+                        # Choisir aléatoirement parmi les options positives
+                        positives = POSITIVE_OPTIONS.get(groupe, options)
+                        if positives:
+                            option_choisie = random.choice(positives)
+                        else:
+                            option_choisie = random.choice(options)
+                    
+                    # Remplacer les {{checkbox}} par ☑ pour l'option choisie et ☐ pour les autres
+                    nouveau_texte = texte
+                    for option in options:
+                        if option == option_choisie:
+                            pattern = r'\{\{checkbox\}\}' + re.escape(option)
+                            nouveau_texte = re.sub(pattern, f"☑ {option}", nouveau_texte)
+                        else:
+                            pattern = r'\{\{checkbox\}\}' + re.escape(option)
+                            nouveau_texte = re.sub(pattern, f"☐ {option}", nouveau_texte)
+                    
+                    # Appliquer le nouveau texte au paragraphe
+                    para.text = nouveau_texte
+
 # Étape 1 : Importer les fichiers
 with st.expander("Etape 1 : Importer les fichiers", expanded=True):
     excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
@@ -90,7 +172,6 @@ if excel_file and word_file:
                         doc = Document(word_file)
                         first = participants.iloc[0]
                         # Remplacements des balises (ex. {{nom}}, {{ref_session}}, etc.)
-                        # Adaptez bien selon vos placeholders dans le document Word
                         replacements = {
                             "{{nom}}": str(first["formateur"]).split()[0] if len(str(first["formateur"]).split()) > 0 else str(first["formateur"]),
                             "{{prénom}}": str(first["formateur"]).split()[1] if len(str(first["formateur"]).split()) > 1 else "",
@@ -103,23 +184,21 @@ if excel_file and word_file:
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
-                        # ----- DÉTECTION DES CHECKBOX « ☐ » ----- #
-                        # On repère chaque paragraphe commençant par le symbole "☐"
+                        # ----- TRAITEMENT DES CHECKBOX {{checkbox}} ----- #
+                        traiter_checkbox_placeholders(doc, reponses_figees)
+
+                        # ----- DÉTECTION DES CHECKBOX « ☐ » (code original conservé) ----- #
                         all_paras = list(iter_all_paragraphs(doc))
                         checkbox_paras = []
 
                         for idx, para in enumerate(all_paras):
                             texte = para.text.strip()
-                            # S’il y a un "☐" en tête, c’est une option de QCM
                             if texte.startswith("☐"):
-                                # Récupérer le « texte d’option » sans le symbole
                                 option_label = texte.lstrip("☐").strip()
 
-                                # On tente de déterminer le groupe grâce au contexte
-                                # On regarde quelques paragraphes précédents pour trouver une phrase-guide
                                 context = ""
                                 for j in range(max(0, idx - 5), idx):
-                                    context += all_paras[j] + " "
+                                    context += all_paras[j].text + " "
 
                                 groupe_nom = None
                                 if "Déroulé de la formation" in context:
@@ -130,7 +209,7 @@ if excel_file and word_file:
                                     groupe_nom = "motivation"
                                 elif "assidus" in context:
                                     groupe_nom = "assiduite"
-                                elif "formation s’est avérée homogène" in context or "homogène" in context:
+                                elif "formation s'est avérée homogène" in context or "homogène" in context:
                                     groupe_nom = "homogeneite"
                                 elif "répondre à toutes les questions" in context or "questions" in context:
                                     groupe_nom = "questions"
@@ -139,8 +218,6 @@ if excel_file and word_file:
                                 elif "tenir à jour le fichier" in context or "suivi" in context:
                                     groupe_nom = "suivi"
                                 else:
-                                    # Fallback : si on ne trouve pas de mot-clé, on essaie de reconnaître
-                                    # le groupe par la simple présence d'une des options dans CHECKBOX_GROUPS
                                     for g, opts in CHECKBOX_GROUPS.items():
                                         if option_label in opts:
                                             groupe_nom = g
@@ -158,35 +235,26 @@ if excel_file and word_file:
                         for groupe, paras in group_to_paras.items():
                             options_presentes = [opt_label for opt_label, _ in paras]
 
-                            # Si l’utilisateur a figé ce groupe, on prend directement la valeur figée
                             if groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
                             else:
-                                # Sinon, on cherche les options « positives » pour ce groupe
                                 positives_disponibles = [
                                     opt_label for opt_label in options_presentes
                                     if groupe in POSITIVE_OPTIONS and opt_label in POSITIVE_OPTIONS[groupe]
                                 ]
                                 if positives_disponibles:
-                                    # Choix aléatoire parmi les positives
                                     option_choisie = random.choice(positives_disponibles)
                                 else:
-                                    # Si pas de positive dispo, on pioche aléatoirement parmi toutes
                                     option_choisie = random.choice(options_presentes) if options_presentes else None
 
-                            # Appliquer le choix : remplacer le symbole "☐" par "☑" sur l'option choisie
                             if option_choisie:
                                 for opt_label, para in paras:
                                     texte_actuel = para.text.strip()
-                                    # Supprimer d’abord toute case en début de ligne (☐ ou ☑)
                                     bare = re.sub(r'^[☐☑]\s*', '', texte_actuel).strip()
                                     if opt_label == option_choisie:
                                         para.text = f"☑ {bare}"
                                     else:
                                         para.text = f"☐ {bare}"
-
-                        # Les sections « pistes » et « observations » sont déjà présentes dans le template,
-                        # donc on ne les rajoute pas ici.
 
                         # Enregistrement du document pour chaque session
                         filename = f"Compte_Rendu_{session_id}.docx"
@@ -194,11 +262,11 @@ if excel_file and word_file:
                         doc.save(path)
                         zipf.write(path, arcname=filename)
 
-                # Téléchargement de l’archive ZIP
+                # Téléchargement de l'archive ZIP
                 with open(zip_path, "rb") as f:
                     st.success("Comptes rendus générés avec succès !")
                     st.download_button(
-                        "📅 Télécharger l’archive ZIP",
+                        "📅 Télécharger l'archive ZIP",
                         data=f,
                         file_name="QCM_Sessions.zip",
                         mime="application/zip"
