@@ -19,7 +19,7 @@ def remplacer_placeholders(paragraph, replacements):
                 if key in run.text:
                     run.text = run.text.replace(key, val)
 
-# Fonction pour itérer sur tous les paragraphes (y compris ceux dans les tableaux)
+# Fonction pour itérer sur tous les paragraphes (y compris dans les tableaux)
 def iter_all_paragraphs(doc):
     for para in doc.paragraphs:
         yield para
@@ -56,7 +56,6 @@ with st.expander("Etape 1 : Importer les fichiers", expanded=True):
     excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
     word_file = st.file_uploader("Modèle Word du compte rendu", type="docx")
 
-# Traitement
 if excel_file and word_file:
     df = pd.read_excel(excel_file)
     df.columns = df.columns.str.strip()
@@ -68,10 +67,20 @@ if excel_file and word_file:
         st.info(f"Colonnes disponibles : {list(df.columns)}")
     else:
         sessions = df.groupby("session")
-        reponses_figees = {}
+
+        # -----------------------------------
+        # On fige 'suivi' à "Non concerné"**
+        # -----------------------------------
+        reponses_figees = {
+            "suivi": "Non concerné"
+        }
 
         st.markdown("### Etape 2 : Choisir les réponses à figer (facultatif)")
         for groupe, options in CHECKBOX_GROUPS.items():
+            if groupe == "suivi":
+                # On ne propose pas de widget pour 'suivi' car c'est déjà fixé en dur
+                continue
+
             figer = st.checkbox(f"Figer la réponse pour : {groupe}", key=f"figer_{groupe}")
             if figer:
                 choix = st.selectbox(f"Choix figé pour {groupe}", options, key=f"choix_{groupe}")
@@ -88,36 +97,28 @@ if excel_file and word_file:
                         doc = Document(word_file)
                         first = participants.iloc[0]
 
-                        # On suppose que votre modèle Word utilise :
-                        #   {{nom}}        pour le nom de famille
-                        #   {{prénom}}     pour le prénom
-                        #   {{formateur}}  pour le nom complet (optionnel)
-                        #   {{ref_session}} pour la référence de session
-                        #   {{formation_dispensee}} pour la formation
-                        #   {{duree_formation}} pour le nombre d'heures
-                        #   {{nb_participants}} pour le nombre de participants
+                        # Préparation des remplacements statiques
                         replacements = {
                             "{{nom}}": str(first["Nom"]),
                             "{{prénom}}": str(first["Prénom"]),
-                            "{{formateur}}": f"{first['Prénom']} {first['Nom']}",
+                            "{{formateur}}": str(first["formateur"]),
                             "{{ref_session}}": str(session_id),
                             "{{formation_dispensee}}": str(first["formation"]),
                             "{{duree_formation}}": str(first["nb d'heure"]),
                             "{{nb_participants}}": str(len(participants))
                         }
 
-                        # Remplacement des placeholders dans tout le document
+                        # 1) Remplacer tous les placeholders
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
-                        # Collecte des paragraphes contenant le placeholder "{{checkbox}}"
-                        # et correspondant à une option QCM
+                        # 2) Repérer les paragraphes contenant "{{checkbox}}" et déterminer le groupe
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
                                 texte = re.sub(r'\s+', ' ', para.text).strip()
-                                for groupe, options in CHECKBOX_GROUPS.items():
-                                    for opt in options:
+                                for groupe, opts in CHECKBOX_GROUPS.items():
+                                    for opt in opts:
                                         if re.search(rf"\b{re.escape(opt)}\b", texte):
                                             checkbox_paras.append((groupe, opt, para))
                                             break
@@ -125,16 +126,14 @@ if excel_file and word_file:
                                         continue
                                     break
 
-                        # Grouper les paragraphes par groupe
+                        # 3) Grouper par 'groupe' et cocher/décocher
                         group_to_paras = defaultdict(list)
                         for groupe, opt, para in checkbox_paras:
                             group_to_paras[groupe].append((opt, para))
 
-                        # Traitement des réponses : cocher (☑) ou décocher (☐)
                         for groupe, paras in group_to_paras.items():
                             options_presentes = [opt for opt, _ in paras]
 
-                            # Déterminer l'option à cocher
                             if groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
                             else:
@@ -147,22 +146,22 @@ if excel_file and word_file:
                                 else:
                                     option_choisie = random.choice(options_presentes) if options_presentes else None
 
-                            # Appliquer le choix
                             if option_choisie:
                                 for opt, para in paras:
                                     for run in para.runs:
                                         if "{{checkbox}}" in run.text:
-                                            # Remplacer "{{checkbox}}" par le symbole adéquat
                                             run.text = run.text.replace(
                                                 "{{checkbox}}",
                                                 "☑" if opt == option_choisie else "☐"
                                             )
 
-                        # Ajout des sections "Avis & pistes d'amélioration" et "Autres observations"
-                        doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
-                        doc.add_paragraph("\nAutres observations :\n" + observations)
+                        # 4) Ajouter les sections libres
+                        doc.add_paragraph("Avis & pistes d'amélioration :")
+                        doc.add_paragraph(pistes)
+                        doc.add_paragraph("Autres observations :")
+                        doc.add_paragraph(observations)
 
-                        # Enregistrement du document pour chaque session
+                        # 5) Sauvegarder et ajouter au ZIP
                         filename = f"Compte_Rendu_{session_id}.docx"
                         path = os.path.join(tmpdir, filename)
                         doc.save(path)
