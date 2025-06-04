@@ -19,7 +19,7 @@ def remplacer_placeholders(paragraph, replacements):
                 if key in run.text:
                     run.text = run.text.replace(key, val)
 
-# Fonction pour itérer sur tous les paragraphes (y compris ceux dans les tableaux)
+# Fonction pour itérer sur tous les paragraphes
 def iter_all_paragraphs(doc):
     for para in doc.paragraphs:
         yield para
@@ -51,13 +51,20 @@ CHECKBOX_GROUPS = {
     "suivi": ["Oui", "Non", "Non concerné"]
 }
 
-# Fonction pour gérer la logique conditionnelle entre adaptation et suivi
+# Fonction pour gérer la logique conditionnelle
 def ajuster_reponses_figees(reponses_figees):
-    if "adaptation" in reponses_figees:
-        if reponses_figees["adaptation"] == "Non":
-            reponses_figees["suivi"] = "Non concerné"
-        elif "suivi" not in reponses_figees:
-            reponses_figees["suivi"] = random.choice(["Oui", "Non"])
+    # Par défaut: adaptation à "Non" et suivi à "Non concerné"
+    if "adaptation" not in reponses_figees:
+        reponses_figees["adaptation"] = "Non"
+    if "suivi" not in reponses_figees:
+        reponses_figees["suivi"] = "Non concerné"
+    
+    # Appliquer la logique conditionnelle
+    if reponses_figees["adaptation"] == "Non":
+        reponses_figees["suivi"] = "Non concerné"
+    elif "suivi" not in reponses_figees:
+        reponses_figees["suivi"] = random.choice(["Oui", "Non"])
+    
     return reponses_figees
 
 # Étape 1 : Importer les fichiers
@@ -70,60 +77,77 @@ if excel_file and word_file:
     df = pd.read_excel(excel_file)
     df.columns = df.columns.str.strip()
 
-    # Vérification des colonnes obligatoires
+    # Vérification des colonnes
     required_columns = ["session", "formateur", "formation", "nb d'heure", "Nom", "Prénom"]
     if not set(required_columns).issubset(df.columns):
-        st.error(f"Colonnes manquantes dans le fichier Excel. Colonnes requises : {required_columns}")
-        st.info(f"Colonnes disponibles : {list(df.columns)}")
+        st.error(f"Colonnes manquantes: {required_columns}")
+        st.info(f"Colonnes disponibles: {list(df.columns)}")
     else:
         sessions = df.groupby("session")
         reponses_figees = {}
 
-        st.markdown("### Etape 2 : Choisir les réponses à figer (facultatif)")
-        
-        # Question d'adaptation
-        figer_adaptation = st.checkbox("Figer la réponse pour l'adaptation", key="figer_adaptation")
-        if figer_adaptation:
-            choix_adaptation = st.selectbox(
-                "Choix figé pour : Avez-vous effectué une adaptation?",
-                ["Oui", "Non"],
-                key="choix_adaptation"
-            )
-            reponses_figees["adaptation"] = choix_adaptation
+        st.markdown("### Etape 2 : Configurer les réponses")
 
-        # Question de suivi (conditionnelle)
-        if "adaptation" in reponses_figees and reponses_figees["adaptation"] == "Oui":
-            figer_suivi = st.checkbox("Figer la réponse pour le suivi", key="figer_suivi")
-            if figer_suivi:
-                choix_suivi = st.selectbox(
-                    "Choix figé pour : Avez-vous mis à jour le fichier?",
+        # Section pour les questions d'adaptation et suivi
+        with st.container():
+            st.subheader("Questions d'adaptation et suivi")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Question d'adaptation avec valeur par défaut "Non"
+                choix_adaptation = st.radio(
+                    "Avez-vous effectué une adaptation?",
                     ["Oui", "Non"],
-                    key="choix_suivi"
+                    index=1,  # "Non" par défaut
+                    key="choix_adaptation"
                 )
-                reponses_figees["suivi"] = choix_suivi
+                reponses_figees["adaptation"] = choix_adaptation
+            
+            with col2:
+                # Question de suivi conditionnelle
+                if choix_adaptation == "Oui":
+                    choix_suivi = st.radio(
+                        "Avez-vous mis à jour le fichier?",
+                        ["Oui", "Non"],
+                        index=0,  # "Oui" par défaut
+                        key="choix_suivi"
+                    )
+                    reponses_figees["suivi"] = choix_suivi
+                else:
+                    # Valeur forcée à "Non concerné" si adaptation est "Non"
+                    reponses_figees["suivi"] = "Non concerné"
+                    st.info("Suivi: Non concerné (car pas d'adaptation)")
 
-        # Autres questions
+        # Section pour les autres questions
+        st.subheader("Autres questions (optionnel)")
         autres_groupes = [g for g in CHECKBOX_GROUPS.keys() if g not in ["adaptation", "suivi"]]
         for groupe in autres_groupes:
-            figer = st.checkbox(f"Figer la réponse pour : {groupe}", key=f"figer_{groupe}")
+            figer = st.checkbox(f"Figer la réponse pour: {groupe}", key=f"figer_{groupe}")
             if figer:
-                choix = st.selectbox(f"Choix figé pour {groupe}", CHECKBOX_GROUPS[groupe], key=f"choix_{groupe}")
+                choix = st.selectbox(
+                    f"Choix pour {groupe}", 
+                    CHECKBOX_GROUPS[groupe],
+                    key=f"choix_{groupe}"
+                )
                 reponses_figees[groupe] = choix
 
-        pistes = st.text_area("Avis & pistes d'amélioration :", key="pistes")
-        observations = st.text_area("Autres observations :", key="obs")
+        # Sections de texte libre
+        st.subheader("Commentaires libres")
+        pistes = st.text_area("Avis & pistes d'amélioration:", key="pistes")
+        observations = st.text_area("Autres observations:", key="obs")
 
         if st.button("🚀 Générer les comptes rendus"):
-            # Appliquer la logique conditionnelle
+            # Appliquer les valeurs par défaut et logique conditionnelle
             reponses_figees = ajuster_reponses_figees(reponses_figees)
             
             with tempfile.TemporaryDirectory() as tmpdir:
-                zip_path = os.path.join(tmpdir, "QCM_Sessions.zip")
+                zip_path = os.path.join(tmpdir, "Comptes_Rendus_Sessions.zip")
                 with ZipFile(zip_path, 'w') as zipf:
                     for session_id, participants in sessions:
                         doc = Document(word_file)
                         first = participants.iloc[0]
 
+                        # Préparation des remplacements
                         replacements = {
                             "{{nom}}": str(first["Nom"]),
                             "{{prénom}}": str(first["Prénom"]),
@@ -134,11 +158,11 @@ if excel_file and word_file:
                             "{{nb_participants}}": str(len(participants))
                         }
 
-                        # Remplacement des placeholders
+                        # Application des remplacements
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
-                        # Collecte des paragraphes avec checkbox
+                        # Traitement des checkbox
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
@@ -152,29 +176,28 @@ if excel_file and word_file:
                                         continue
                                     break
 
-                        # Grouper les paragraphes par groupe
+                        # Grouper par type de question
                         group_to_paras = defaultdict(list)
                         for groupe, opt, para in checkbox_paras:
                             group_to_paras[groupe].append((opt, para))
 
-                        # Traitement des réponses
+                        # Cocher les bonnes réponses
                         for groupe, paras in group_to_paras.items():
                             options_presentes = [opt for opt, _ in paras]
                             
-                            # Déterminer l'option à cocher
+                            # Déterminer la réponse à cocher
                             if groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
                             else:
-                                positives_disponibles = [
-                                    opt for opt in options_presentes
-                                    if groupe in POSITIVE_OPTIONS and opt in POSITIVE_OPTIONS[groupe]
-                                ]
+                                positives = POSITIVE_OPTIONS.get(groupe, [])
+                                positives_disponibles = [opt for opt in options_presentes if opt in positives]
+                                
                                 if positives_disponibles:
                                     option_choisie = random.choice(positives_disponibles)
                                 else:
                                     option_choisie = random.choice(options_presentes) if options_presentes else None
 
-                            # Appliquer le choix
+                            # Appliquer la coche
                             if option_choisie:
                                 for opt, para in paras:
                                     for run in para.runs:
@@ -184,24 +207,24 @@ if excel_file and word_file:
                                                 "☑" if opt == option_choisie else "☐"
                                             )
 
-                        # Ajout des sections texte
+                        # Ajout des commentaires
                         if pistes:
-                            doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
+                            doc.add_paragraph("\nAvis & pistes d'amélioration:\n" + pistes)
                         if observations:
-                            doc.add_paragraph("\nAutres observations :\n" + observations)
+                            doc.add_paragraph("\nAutres observations:\n" + observations)
 
-                        # Enregistrement
-                        filename = f"Compte_Rendu_{session_id}.docx"
+                        # Sauvegarde du document
+                        filename = f"Compte_Rendu_Session_{session_id}.docx"
                         path = os.path.join(tmpdir, filename)
                         doc.save(path)
                         zipf.write(path, arcname=filename)
 
                 # Téléchargement
                 with open(zip_path, "rb") as f:
-                    st.success("Comptes rendus générés avec succès !")
+                    st.success(f"{len(sessions)} comptes rendus générés avec succès!")
                     st.download_button(
-                        "📅 Télécharger l'archive ZIP",
+                        "💾 Télécharger l'archive ZIP",
                         data=f,
-                        file_name="QCM_Sessions.zip",
+                        file_name="Comptes_Rendus_Formations.zip",
                         mime="application/zip"
                     )
