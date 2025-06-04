@@ -48,7 +48,7 @@ CHECKBOX_GROUPS = {
     "motivation": ["Très motivés", "Motivés", "Pas motivés"],
     "assiduite": ["Très motivés", "Motivés", "Pas motivés"],
     "homogeneite": ["Oui", "Non"],
-    "questions": ["Toutes les questions", "A peu près tounes", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", "Je n'ai pas pu répondre à la majorité des questions"],
+    "questions": ["Toutes les questions", "A peu près toutes", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", "Je n'ai pas pu répondre à la majorité des questions"],
     "adaptation": ["Oui", "Non"],
     "suivi": ["Oui", "Non", "Non concerné"]
 }
@@ -129,34 +129,41 @@ if excel_file and word_file:
                         # Collecte des paragraphes contenant le placeholder "{{checkbox}}"
                         # et correspondant à une option QCM
                         checkbox_paras = []
-                        for para in iter_all_paragraphs(doc):
+                        all_paragraphs = list(iter_all_paragraphs(doc))
+                        
+                        for i, para in enumerate(all_paragraphs):
                             if "{{checkbox}}" in para.text:
                                 texte = re.sub(r'\s+', ' ', para.text).strip()
                                 
-                                # Détection spécifique par contexte pour éviter les confusions
-                                if "niveau global de satisfaction" in para.text or "niveau global de satisfaction" in str(para._element.getprevious()):
-                                    groupe_detecte = "satisfaction_globale"
-                                elif "Déroulé de la formation" in para.text or any("Déroulé de la formation" in str(p.text) for p in doc.paragraphs if doc.paragraphs.index(p) < doc.paragraphs.index(para) and doc.paragraphs.index(p) > doc.paragraphs.index(para) - 5):
-                                    groupe_detecte = "satisfaction_deroulement"
-                                elif "adaptation du déroulé" in texte.lower():
+                                # Récupérer le contexte (paragraphes précédents)
+                                contexte = ""
+                                for j in range(max(0, i-5), i):
+                                    contexte += " " + all_paragraphs[j].text
+                                contexte = contexte.lower()
+                                
+                                # Détection spécifique par contexte et contenu du paragraphe
+                                groupe_detecte = None
+                                para_text_lower = para.text.lower()
+                                
+                                if "adaptation du déroulé" in contexte or "adaptation du déroulé" in para_text_lower:
                                     groupe_detecte = "adaptation"
-                                elif "fichier de suivi" in texte.lower():
+                                elif "fichier de suivi" in contexte or "fichier de suivi" in para_text_lower:
                                     groupe_detecte = "suivi"
-                                else:
-                                    # Détection classique pour les autres groupes
-                                    groupe_detecte = None
-                                    for groupe, options in CHECKBOX_GROUPS.items():
-                                        if groupe in ["satisfaction_globale", "satisfaction_deroulement"]:
-                                            continue  # Déjà gérés ci-dessus
-                                        for opt in options:
-                                            if re.search(rf"\b{re.escape(opt)}\b", texte):
-                                                groupe_detecte = groupe
-                                                break
-                                        if groupe_detecte:
-                                            break
+                                elif "niveau global de satisfaction" in contexte:
+                                    groupe_detecte = "satisfaction_globale"
+                                elif ("déroulé de la formation" in contexte and i > len(all_paragraphs) * 0.7) or ("déroulé de la formation" in para_text_lower and "très satisfait" in para_text_lower):
+                                    groupe_detecte = "satisfaction_deroulement"
+                                elif "motivés" in texte and "participants étaient-ils motivés" in contexte:
+                                    groupe_detecte = "motivation"
+                                elif "motivés" in texte and "assidus" in contexte:
+                                    groupe_detecte = "assiduite"
+                                elif ("oui" in texte.lower() or "non" in texte.lower()) and "homogène" in contexte:
+                                    groupe_detecte = "homogeneite"
+                                elif ("toutes les questions" in texte.lower() or "peu près toutes" in texte.lower() or "quelques sujets" in texte.lower() or "majorité des questions" in texte.lower()) and "répondre" in contexte:
+                                    groupe_detecte = "questions"
                                 
                                 # Ajouter le paragraphe avec son groupe détecté
-                                if groupe_detecte:
+                                if groupe_detecte and groupe_detecte in CHECKBOX_GROUPS:
                                     for opt in CHECKBOX_GROUPS[groupe_detecte]:
                                         if re.search(rf"\b{re.escape(opt)}\b", texte):
                                             checkbox_paras.append((groupe_detecte, opt, para))
