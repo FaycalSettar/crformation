@@ -130,7 +130,7 @@ if excel_file and word_file:
                         replacements = {
                             "{{nom}}": str(first["Nom"]),
                             "{{prénom}}": str(first["Prénom"]),
-                            "{{formateur}}": f"{first['Prénom']} {first['Nom']}",
+                            "{{formateur}}": str(first["formateur"]),  # Utilisation de la colonne "formateur"
                             "{{ref_session}}": str(session_id),
                             "{{formation_dispensee}}": str(first["formation"]),
                             "{{duree_formation}}": str(first["nb d'heure"]),
@@ -189,7 +189,7 @@ if excel_file and word_file:
                                 elif "questions" in header:
                                     groupe = "questions"
                                 elif "déroul" in header or "deroul" in header:
-                                    # On reconnaît "Déroulé de la formation" → groupe "satisfaction"
+                                    # On reconnaît "Déroulé de la formation :"
                                     groupe = "satisfaction"
                                 elif "satisfaction" in header:
                                     groupe = "satisfaction"
