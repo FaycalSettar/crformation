@@ -70,13 +70,13 @@ CHECKBOX_GROUPS = {
         "Je n'ai pas pu répondre à la majorité des questions"
     ],
     "adaptation": [
-        "Oui",
-        "Non"
+        "Non",
+        "Oui"
     ],
     "suivi": [
-        "Oui",
+        "Non concerné",
         "Non",
-        "Non concerné"
+        "Oui"
     ]
 }
 
