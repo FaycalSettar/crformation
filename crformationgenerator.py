@@ -11,7 +11,6 @@ from collections import defaultdict
 st.set_page_config(page_title="Générateur de QCM par session", layout="centered")
 st.title("📄 Générateur de QCM par session (figé ou aléatoire)")
 
-# Fonction de remplacement des balises
 def remplacer_placeholders(paragraph, replacements):
     for key, val in replacements.items():
         if key in paragraph.text:
@@ -19,7 +18,6 @@ def remplacer_placeholders(paragraph, replacements):
                 if key in run.text:
                     run.text = run.text.replace(key, val)
 
-# Fonction pour itérer sur tous les paragraphes (y compris ceux dans les tableaux)
 def iter_all_paragraphs(doc):
     for para in doc.paragraphs:
         yield para
@@ -29,7 +27,6 @@ def iter_all_paragraphs(doc):
                 for para in cell.paragraphs:
                     yield para
 
-# Définition des réponses positives pour chaque groupe
 POSITIVE_OPTIONS = {
     "satisfaction": ["Très satisfait", "Satisfait"],
     "motivation": ["Très motivés", "Motivés"],
@@ -40,7 +37,6 @@ POSITIVE_OPTIONS = {
     "suivi": ["Oui"]
 }
 
-# Détection des blocs de checkbox
 CHECKBOX_GROUPS = {
     "satisfaction": ["Très satisfait", "Satisfait", "Moyennement satisfait", "Insatisfait", "Non satisfait"],
     "motivation": ["Très motivés", "Motivés", "Pas motivés"],
@@ -51,12 +47,10 @@ CHECKBOX_GROUPS = {
     "suivi": ["Oui", "Non", "Non concerné"]
 }
 
-# Étape 1 : Importer les fichiers
 with st.expander("Etape 1 : Importer les fichiers", expanded=True):
     excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
     word_file = st.file_uploader("Modèle Word du compte rendu", type="docx")
 
-# Traitement
 if excel_file and word_file:
     df = pd.read_excel(excel_file)
     df.columns = df.columns.str.strip()
@@ -100,6 +94,19 @@ if excel_file and word_file:
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
+                        # Figer en dur les réponses à 2 questions spécifiques
+                        for para in iter_all_paragraphs(doc):
+                            texte = para.text.strip().lower()
+                            for run in para.runs:
+                                if "avez-vous effectué une quelconque adaptation du déroulé de la formation" in texte:
+                                    run.text = run.text.replace("{{checkbox}}Oui", "☐Oui").replace("{{checkbox}}Non", "☑Non")
+                                if "avez-vous pensé à tenir à jour le fichier de suivi" in texte:
+                                    run.text = (
+                                        run.text.replace("{{checkbox}}Oui", "☐Oui")
+                                                .replace("{{checkbox}}Non", "☐Non")
+                                                .replace("{{checkbox}}Non concerné", "☑Non concerné")
+                                    )
+
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
@@ -120,11 +127,9 @@ if excel_file and word_file:
                         for groupe, paras in group_to_paras.items():
                             options_presentes = [opt for opt, _ in paras]
 
-                            # >>> FIGEMENT EN DUR <<<
-                            if groupe == "adaptation":
-                                option_choisie = "Non"
-                            elif groupe == "suivi":
-                                option_choisie = "Non concerné"
+                            # Sauf si déjà figé manuellement (adaptation / suivi)
+                            if groupe in ["adaptation", "suivi"]:
+                                continue
                             elif groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
                             else:
