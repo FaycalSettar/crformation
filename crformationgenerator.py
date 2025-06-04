@@ -36,8 +36,8 @@ POSITIVE_OPTIONS = {
     "assiduite": ["Très motivés", "Motivés"],
     "homogeneite": ["Oui"],
     "questions": ["Toutes les questions", "A peu près toutes"],
-    "adaptation": ["Oui"],
-    "suivi": ["Oui"]
+    "adaptation": ["Non"],
+    "suivi": ["Non concerné"]
 }
 
 # Détection des blocs de checkbox
@@ -71,12 +71,7 @@ if excel_file and word_file:
         reponses_figees = {}
 
         st.markdown("### Etape 2 : Choisir les réponses à figer (facultatif)")
-        
-        # Boucle pour figer les autres groupes (sauf "adaptation" et "suivi")
         for groupe, options in CHECKBOX_GROUPS.items():
-            # Exclure les deux groupes déjà figés
-            if groupe in ["adaptation", "suivi"]:
-                continue
             figer = st.checkbox(f"Figer la réponse pour : {groupe}", key=f"figer_{groupe}")
             if figer:
                 choix = st.selectbox(f"Choix figé pour {groupe}", options, key=f"choix_{groupe}")
@@ -84,10 +79,6 @@ if excel_file and word_file:
 
         pistes = st.text_area("Avis & pistes d'amélioration :", key="pistes")
         observations = st.text_area("Autres observations :", key="obs")
-
-        # Réponses figées demandées (ne pas modifier)
-        reponses_figees["adaptation"] = "Non"
-        reponses_figees["suivi"] = "Non concerné"
 
         if st.button("🚀 Générer les comptes rendus"):
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -97,7 +88,14 @@ if excel_file and word_file:
                         doc = Document(word_file)
                         first = participants.iloc[0]
 
-                        # Remplacements généraux
+                        # On suppose que votre modèle Word utilise :
+                        #   {{nom}}        pour le nom de famille
+                        #   {{prénom}}     pour le prénom
+                        #   {{formateur}}  pour le nom complet (optionnel)
+                        #   {{ref_session}} pour la référence de session
+                        #   {{formation_dispensee}} pour la formation
+                        #   {{duree_formation}} pour le nombre d'heures
+                        #   {{nb_participants}} pour le nombre de participants
                         replacements = {
                             "{{nom}}": str(first["Nom"]),
                             "{{prénom}}": str(first["Prénom"]),
@@ -108,11 +106,12 @@ if excel_file and word_file:
                             "{{nb_participants}}": str(len(participants))
                         }
 
-                        # Remplacement des placeholders
+                        # Remplacement des placeholders dans tout le document
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
-                        # Collecte des paragraphes avec checkbox
+                        # Collecte des paragraphes contenant le placeholder "{{checkbox}}"
+                        # et correspondant à une option QCM
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
@@ -126,14 +125,16 @@ if excel_file and word_file:
                                         continue
                                     break
 
-                        # Grouper par groupe
+                        # Grouper les paragraphes par groupe
                         group_to_paras = defaultdict(list)
                         for groupe, opt, para in checkbox_paras:
                             group_to_paras[groupe].append((opt, para))
 
-                        # Traitement des réponses
+                        # Traitement des réponses : cocher (☑) ou décocher (☐)
                         for groupe, paras in group_to_paras.items():
                             options_presentes = [opt for opt, _ in paras]
+
+                            # Déterminer l'option à cocher
                             if groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
                             else:
@@ -141,33 +142,33 @@ if excel_file and word_file:
                                     opt for opt in options_presentes
                                     if groupe in POSITIVE_OPTIONS and opt in POSITIVE_OPTIONS[groupe]
                                 ]
-                                option_choisie = (
-                                    random.choice(positives_disponibles)
-                                    if positives_disponibles
-                                    else random.choice(options_presentes) if options_presentes else None
-                                )
+                                if positives_disponibles:
+                                    option_choisie = random.choice(positives_disponibles)
+                                else:
+                                    option_choisie = random.choice(options_presentes) if options_presentes else None
 
                             # Appliquer le choix
                             if option_choisie:
                                 for opt, para in paras:
                                     for run in para.runs:
                                         if "{{checkbox}}" in run.text:
+                                            # Remplacer "{{checkbox}}" par le symbole adéquat
                                             run.text = run.text.replace(
                                                 "{{checkbox}}",
                                                 "☑" if opt == option_choisie else "☐"
                                             )
 
-                        # Ajout des sections libres
+                        # Ajout des sections "Avis & pistes d'amélioration" et "Autres observations"
                         doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
                         doc.add_paragraph("\nAutres observations :\n" + observations)
 
-                        # Enregistrement du document
+                        # Enregistrement du document pour chaque session
                         filename = f"Compte_Rendu_{session_id}.docx"
                         path = os.path.join(tmpdir, filename)
                         doc.save(path)
                         zipf.write(path, arcname=filename)
 
-                # Téléchargement ZIP
+                # Téléchargement de l'archive ZIP
                 with open(zip_path, "rb") as f:
                     st.success("Comptes rendus générés avec succès !")
                     st.download_button(
