@@ -11,7 +11,7 @@ from collections import defaultdict
 st.set_page_config(page_title="Générateur de QCM par session", layout="centered")
 st.title("📄 Générateur de QCM par session (figé ou aléatoire)")
 
-# 1. Fonction de remplacement des champs classiques ({{nom}}, {{prénom}}, etc.)
+# 1. Fonction pour remplacer {{nom}}, {{prénom}}, etc.
 def remplacer_placeholders(paragraph, replacements):
     for key, val in replacements.items():
         if key in paragraph.text:
@@ -19,7 +19,7 @@ def remplacer_placeholders(paragraph, replacements):
                 if key in run.text:
                     run.text = run.text.replace(key, val)
 
-# 2. Itérateur sur tous les paragraphes (même ceux dans les tableaux)
+# 2. Itérateur sur tous les paragraphes (y compris dans les tableaux)
 def iter_all_paragraphs(doc):
     for para in doc.paragraphs:
         yield para
@@ -29,18 +29,17 @@ def iter_all_paragraphs(doc):
                 for para in cell.paragraphs:
                     yield para
 
-# 3. Options positives (pour tirage aléatoire si non figé)
+# 3. Options positives (aléatoire si non figé)
 POSITIVE_OPTIONS = {
     "satisfaction": ["Très satisfait", "Satisfait"],
     "motivation": ["Très motivés", "Motivés"],
     "assiduite": ["Très motivés", "Motivés"],
     "homogeneite": ["Oui"],
     "questions": ["Toutes les questions", "A peu près toutes"],
-    # On ne laisse volontairement pas "adaptation" ni "suivi" ici,
-    # car on les figera systématiquement plus bas.
+    # on ne met pas adaptation/suivi ici, car on va les figer systématiquement
 }
 
-# 4. Groupes de tous les libellés de cases à cocher (doivent correspondre à votre gabarit Word)
+# 4. Toutes les valeurs possibles pour chaque groupe de cases à cocher
 CHECKBOX_GROUPS = {
     "satisfaction": [
         "Très satisfait",
@@ -70,29 +69,25 @@ CHECKBOX_GROUPS = {
         "Je n'ai pas pu répondre à la majorité des questions"
     ],
     "adaptation": [
-        "Non",
-        "Oui"
+        "Oui",
+        "Non"
     ],
     "suivi": [
-        "Non concerné",
+        "Oui",
         "Non",
-        "Oui"
+        "Non concerné"
     ]
 }
 
-# 5. Logique conditionnelle (au cas où adaptation n'existerait pas dans reponses_figees)
+# 5. Si jamais adaptation n'est pas défini, on le force à "Non" ; si adaptation="Non", on force suivi="Non concerné"
 def appliquer_logique_conditionnelle(reponses_figees):
-    # S'il manque adaptation, on force à "Non"
     if "adaptation" not in reponses_figees:
         reponses_figees["adaptation"] = "Non"
-    # Si adaptation = "Non", on force suivi à "Non concerné"
     if reponses_figees["adaptation"] == "Non":
         reponses_figees["suivi"] = "Non concerné"
     return reponses_figees
 
-# === Début de l'application Streamlit ===
-
-# Étape 1 : import des fichiers Excel et Word
+# === Début de l’app ===
 with st.expander("Etape 1 : Importer les fichiers", expanded=True):
     excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
     word_file = st.file_uploader("Modèle Word du compte rendu", type="docx")
@@ -101,23 +96,20 @@ if excel_file and word_file:
     df = pd.read_excel(excel_file)
     df.columns = df.columns.str.strip()
 
-    # Colonnes obligatoires dans l'Excel
     required_columns = ["session", "formateur", "formation", "nb d'heure", "Nom", "Prénom"]
     if not set(required_columns).issubset(df.columns):
         st.error(f"Colonnes manquantes dans le fichier Excel. Colonnes requises : {required_columns}")
         st.info(f"Colonnes disponibles : {list(df.columns)}")
     else:
-        # On regroupe par session
         sessions = df.groupby("session")
         reponses_figees = {}
 
-        # Étape 2 : on ne propose pas de radio pour adaptation/suivi, on fige directement
+        # === Étape 2 : on fige adaptation et suivi, sans interface utilisateur ===
         st.markdown("### Etape 2 : Adaptation & suivi figés automatiquement")
-        # on force ces deux clés
         reponses_figees["adaptation"] = "Non"
         reponses_figees["suivi"] = "Non concerné"
 
-        # On laisse le choix de figer les autres groupes éventuels si besoin
+        # On laisse la possibilité de figer les autres groupes si besoin
         st.subheader("Autres questions (optionnel)")
         autres_groupes = [g for g in CHECKBOX_GROUPS.keys() if g not in ["adaptation", "suivi"]]
         for groupe in autres_groupes:
@@ -130,7 +122,6 @@ if excel_file and word_file:
         observations = st.text_area("Autres observations :", key="obs")
 
         if st.button("🚀 Générer les comptes rendus"):
-            # Re-validation de la logique pour adaptation / suivi
             reponses_figees = appliquer_logique_conditionnelle(reponses_figees)
 
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -140,7 +131,7 @@ if excel_file and word_file:
                         doc = Document(word_file)
                         first = participants.iloc[0]
 
-                        # 6. Remplacement des champs classiques dans tout le document
+                        # 6. Remplacement des balises classiques dans tout le document
                         replacements = {
                             "{{nom}}": str(first["Nom"]),
                             "{{prénom}}": str(first["Prénom"]),
@@ -153,16 +144,14 @@ if excel_file and word_file:
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
-                        # 7. Détection des paragraphes contenant {{checkbox}}
+                        # 7. Détection des paragraphes qui contiennent un symbole "☑" ou "☐"
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
-                            if "{{checkbox}}" in para.text:
-                                # On nettoie les espaces redondants
+                            if any(sym in para.text for sym in ["☑", "☐"]):
                                 texte = re.sub(r"\s+", " ", para.text).strip()
                                 for groupe, options in CHECKBOX_GROUPS.items():
                                     for opt in options:
-                                        # Si l'option (texte) apparaît dans ce paragraphe
-                                        # on considère que c'est du groupe ‘groupe’
+                                        # Si l'option (par ex. "Non") apparaît dans ce paragraphe
                                         if re.search(rf"\b{re.escape(opt)}\b", texte):
                                             checkbox_paras.append((groupe, opt, para))
                                             break
@@ -170,21 +159,19 @@ if excel_file and word_file:
                                         continue
                                     break
 
-                        # 8. Grouper par groupe de question
+                        # 8. Grouper ces paragraphes par groupe de question
                         group_to_paras = defaultdict(list)
                         for groupe, opt, para in checkbox_paras:
                             group_to_paras[groupe].append((opt, para))
 
-                        # 9. Parcours des groupes pour cocher ou décocher
+                        # 9. Pour chaque groupe, déterminer l'option à cocher et remplacer le symbole
                         for groupe, paras in group_to_paras.items():
-                            # Liste des libellés effectivement présents dans le doc pour ce groupe
                             options_presentes = [opt for opt, _ in paras]
 
-                            # 9.a. Déterminer l’option à cocher
+                            # 9.a. Choix figé ou aléatoire
                             if groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
                             else:
-                                # Si on n'a pas figé ce groupe, on prend au hasard
                                 positives_disponibles = [
                                     opt for opt in options_presentes
                                     if groupe in POSITIVE_OPTIONS and opt in POSITIVE_OPTIONS[groupe]
@@ -194,22 +181,25 @@ if excel_file and word_file:
                                 else:
                                     option_choisie = random.choice(options_presentes)
 
-                            # 9.b. Appliquer le remplacement dans chacun des paragraphes
+                            # 9.b. Pour chaque (opt, para), parcourir les runs et remplacer le symbole
                             for opt, para in paras:
                                 for run in para.runs:
-                                    if "{{checkbox}}" in run.text:
-                                        # On remplace le texte littéral "{{checkbox}}"
-                                        # par "☑" si c'est l'option choisie, sinon "☐"
-                                        symbole = "☑" if opt == option_choisie else "☐"
-                                        run.text = run.text.replace("{{checkbox}}", symbole)
+                                    # On recherche un run contenant l'un des deux symboles en tout début de texte
+                                    # Par exemple run.text == "☑Oui" ou run.text == "☐Non", etc.
+                                    if run.text.strip().startswith(("☑", "☐")):
+                                        # Conserver le texte après le symbole, par ex. "Oui" ou "Non"
+                                        reste = run.text.strip()[1:]
+                                        nouveau_symbole = "☑" if opt == option_choisie else "☐"
+                                        run.text = f"{nouveau_symbole}{reste}"
+                                        break  # on ne modifie qu'une fois par run
 
-                        # 10. Ajout des zones “avis & pistes” et “observations”
+                        # 10. Ajout des paragraphes "Avis & pistes" et "Observations"
                         if pistes.strip():
                             doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
                         if observations.strip():
                             doc.add_paragraph("\nAutres observations :\n" + observations)
 
-                        # 11. Sauvegarde du fichier Word pour cette session
+                        # 11. Sauvegarde du document pour cette session
                         filename = f"Compte_Rendu_{session_id}.docx"
                         path = os.path.join(tmpdir, filename)
                         doc.save(path)
