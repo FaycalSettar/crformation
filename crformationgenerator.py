@@ -19,7 +19,7 @@ def remplacer_placeholders(paragraph, replacements):
                 if key in run.text:
                     run.text = run.text.replace(key, val)
 
-# Fonction pour itérer sur tous les paragraphes (y compris dans les tableaux)
+# Fonction pour itérer sur tous les paragraphes (y compris ceux dans les tableaux)
 def iter_all_paragraphs(doc):
     for para in doc.paragraphs:
         yield para
@@ -47,8 +47,8 @@ CHECKBOX_GROUPS = {
     "assiduite": ["Très motivés", "Motivés", "Pas motivés"],
     "homogeneite": ["Oui", "Non"],
     "questions": ["Toutes les questions", "A peu près toutes", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", "Je n'ai pas pu répondre à la majorité des questions"],
-    "adaptation": ["Oui", "Non"],
-    "suivi": ["Oui", "Non", "Non concerné"]
+    "adaptation": ["Oui", "Non"],  # Groupe pour la question d'adaptation
+    "suivi": ["Oui", "Non", "Non concerné"]  # Groupe pour la question de suivi
 }
 
 # Étape 1 : Importer les fichiers
@@ -56,6 +56,7 @@ with st.expander("Etape 1 : Importer les fichiers", expanded=True):
     excel_file = st.file_uploader("Fichier Excel des participants", type="xlsx")
     word_file = st.file_uploader("Modèle Word du compte rendu", type="docx")
 
+# Traitement
 if excel_file and word_file:
     df = pd.read_excel(excel_file)
     df.columns = df.columns.str.strip()
@@ -67,24 +68,27 @@ if excel_file and word_file:
         st.info(f"Colonnes disponibles : {list(df.columns)}")
     else:
         sessions = df.groupby("session")
-
-        # -----------------------------------
-        # On fige 'suivi' à "Non concerné"**
-        # -----------------------------------
-        reponses_figees = {
-            "suivi": "Non concerné"
-        }
+        reponses_figees = {}
 
         st.markdown("### Etape 2 : Choisir les réponses à figer (facultatif)")
+        groupes_a_exclure = ["adaptation", "suivi"]  # Groupes à exclure de la sélection
+        
         for groupe, options in CHECKBOX_GROUPS.items():
-            if groupe == "suivi":
-                # On ne propose pas de widget pour 'suivi' car c'est déjà fixé en dur
-                continue
-
+            if groupe in groupes_a_exclure:
+                continue  # Sauter les groupes exclus
+            
             figer = st.checkbox(f"Figer la réponse pour : {groupe}", key=f"figer_{groupe}")
             if figer:
                 choix = st.selectbox(f"Choix figé pour {groupe}", options, key=f"choix_{groupe}")
                 reponses_figees[groupe] = choix
+
+        # Ajout des réponses figées pour les questions spécifiques
+        reponses_figees["adaptation"] = "Non"  # Toujours figé à "Non"
+        reponses_figees["suivi"] = "Non concerné"  # Toujours figé à "Non concerné"
+
+        st.info("**Questions systématiquement figées :**")
+        st.markdown("- Avez-vous effectué une quelconque adaptation : **Non**")
+        st.markdown("- Mise à jour du fichier de suivi : **Non concerné**")
 
         pistes = st.text_area("Avis & pistes d'amélioration :", key="pistes")
         observations = st.text_area("Autres observations :", key="obs")
@@ -97,28 +101,27 @@ if excel_file and word_file:
                         doc = Document(word_file)
                         first = participants.iloc[0]
 
-                        # Préparation des remplacements statiques
                         replacements = {
                             "{{nom}}": str(first["Nom"]),
                             "{{prénom}}": str(first["Prénom"]),
-                            "{{formateur}}": str(first["formateur"]),
+                            "{{formateur}}": f"{first['Prénom']} {first['Nom']}",
                             "{{ref_session}}": str(session_id),
                             "{{formation_dispensee}}": str(first["formation"]),
                             "{{duree_formation}}": str(first["nb d'heure"]),
                             "{{nb_participants}}": str(len(participants))
                         }
 
-                        # 1) Remplacer tous les placeholders
+                        # Remplacement des placeholders dans tout le document
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
-                        # 2) Repérer les paragraphes contenant "{{checkbox}}" et déterminer le groupe
+                        # Collecte des paragraphes contenant le placeholder "{{checkbox}}"
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
                                 texte = re.sub(r'\s+', ' ', para.text).strip()
-                                for groupe, opts in CHECKBOX_GROUPS.items():
-                                    for opt in opts:
+                                for groupe, options in CHECKBOX_GROUPS.items():
+                                    for opt in options:
                                         if re.search(rf"\b{re.escape(opt)}\b", texte):
                                             checkbox_paras.append((groupe, opt, para))
                                             break
@@ -126,14 +129,16 @@ if excel_file and word_file:
                                         continue
                                     break
 
-                        # 3) Grouper par 'groupe' et cocher/décocher
+                        # Grouper les paragraphes par groupe
                         group_to_paras = defaultdict(list)
                         for groupe, opt, para in checkbox_paras:
                             group_to_paras[groupe].append((opt, para))
 
+                        # Traitement des réponses : cocher (☑) ou décocher (☐)
                         for groupe, paras in group_to_paras.items():
                             options_presentes = [opt for opt, _ in paras]
 
+                            # Déterminer l'option à cocher
                             if groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
                             else:
@@ -146,22 +151,22 @@ if excel_file and word_file:
                                 else:
                                     option_choisie = random.choice(options_presentes) if options_presentes else None
 
+                            # Appliquer le choix
                             if option_choisie:
                                 for opt, para in paras:
                                     for run in para.runs:
                                         if "{{checkbox}}" in run.text:
+                                            # Remplacer "{{checkbox}}" par le symbole adéquat
                                             run.text = run.text.replace(
                                                 "{{checkbox}}",
                                                 "☑" if opt == option_choisie else "☐"
                                             )
 
-                        # 4) Ajouter les sections libres
-                        doc.add_paragraph("Avis & pistes d'amélioration :")
-                        doc.add_paragraph(pistes)
-                        doc.add_paragraph("Autres observations :")
-                        doc.add_paragraph(observations)
+                        # Ajout des sections "Avis & pistes d'amélioration" et "Autres observations"
+                        doc.add_paragraph("\nAvis & pistes d'amélioration :\n" + pistes)
+                        doc.add_paragraph("\nAutres observations :\n" + observations)
 
-                        # 5) Sauvegarder et ajouter au ZIP
+                        # Enregistrement du document pour chaque session
                         filename = f"Compte_Rendu_{session_id}.docx"
                         path = os.path.join(tmpdir, filename)
                         doc.save(path)
