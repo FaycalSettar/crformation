@@ -40,15 +40,15 @@ POSITIVE_OPTIONS = {
     "suivi": ["Oui"]
 }
 
-# Détection des blocs de checkbox
+# Détection des blocs de checkbox avec des identifiants plus robustes
 CHECKBOX_GROUPS = {
     "satisfaction": ["Très satisfait", "Satisfait", "Moyennement satisfait", "Insatisfait", "Non satisfait"],
     "motivation": ["Très motivés", "Motivés", "Pas motivés"],
     "assiduite": ["Très motivés", "Motivés", "Pas motivés"],
     "homogeneite": ["Oui", "Non"],
     "questions": ["Toutes les questions", "A peu près toutes", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", "Je n'ai pas pu répondre à la majorité des questions"],
-    "adaptation": ["Oui", "Non"],
-    "suivi": ["Oui", "Non", "Non concerné"]
+    "adaptation": ["Oui", "Non"],  # Groupe pour la question d'adaptation
+    "suivi": ["Oui", "Non", "Non concerné"]  # Groupe pour la question de suivi
 }
 
 # Étape 1 : Importer les fichiers
@@ -71,11 +71,24 @@ if excel_file and word_file:
         reponses_figees = {}
 
         st.markdown("### Etape 2 : Choisir les réponses à figer (facultatif)")
+        groupes_a_exclure = ["adaptation", "suivi"]  # Groupes à exclure de la sélection
+        
         for groupe, options in CHECKBOX_GROUPS.items():
+            if groupe in groupes_a_exclure:
+                continue  # Sauter les groupes exclus
+            
             figer = st.checkbox(f"Figer la réponse pour : {groupe}", key=f"figer_{groupe}")
             if figer:
                 choix = st.selectbox(f"Choix figé pour {groupe}", options, key=f"choix_{groupe}")
                 reponses_figees[groupe] = choix
+
+        # Ajout des réponses figées pour les questions spécifiques
+        reponses_figees["adaptation"] = "Non"  # Toujours figé à "Non"
+        reponses_figees["suivi"] = "Non concerné"  # Toujours figé à "Non concerné"
+
+        st.info("**Questions systématiquement figées :**")
+        st.markdown("- Avez-vous effectué une quelconque adaptation : **Non**")
+        st.markdown("- Mise à jour du fichier de suivi : **Non concerné**")
 
         pistes = st.text_area("Avis & pistes d'amélioration :", key="pistes")
         observations = st.text_area("Autres observations :", key="obs")
@@ -88,14 +101,6 @@ if excel_file and word_file:
                         doc = Document(word_file)
                         first = participants.iloc[0]
 
-                        # On suppose que votre modèle Word utilise :
-                        #   {{nom}}        pour le nom de famille
-                        #   {{prénom}}     pour le prénom
-                        #   {{formateur}}  pour le nom complet (optionnel)
-                        #   {{ref_session}} pour la référence de session
-                        #   {{formation_dispensee}} pour la formation
-                        #   {{duree_formation}} pour le nombre d'heures
-                        #   {{nb_participants}} pour le nombre de participants
                         replacements = {
                             "{{nom}}": str(first["Nom"]),
                             "{{prénom}}": str(first["Prénom"]),
@@ -110,52 +115,90 @@ if excel_file and word_file:
                         for para in iter_all_paragraphs(doc):
                             remplacer_placeholders(para, replacements)
 
+                        # Nouvelle méthode de détection des groupes
+                        # Nous allons d'abord trouver les paragraphes contenant les textes clés des questions
+                        group_questions = {
+                            "adaptation": "adaptation du déroulé",
+                            "suivi": "fichier de suivi"
+                        }
+                        
+                        # Créer un mapping des paragraphes aux groupes
+                        para_to_group = {}
+                        for para in iter_all_paragraphs(doc):
+                            text = para.text.lower()
+                            for group, keyword in group_questions.items():
+                                if keyword in text:
+                                    # Trouver tous les paragraphes suivants jusqu'à la prochaine question
+                                    current_para = para
+                                    while current_para:
+                                        next_para = current_para.next_paragraph
+                                        if next_para and "{{checkbox}}" in next_para.text:
+                                            para_to_group[next_para] = group
+                                        elif next_para and any(kw in next_para.text.lower() for kw in group_questions.values()):
+                                            break
+                                        current_para = next_para
+
                         # Collecte des paragraphes contenant le placeholder "{{checkbox}}"
-                        # et correspondant à une option QCM
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
-                                texte = re.sub(r'\s+', ' ', para.text).strip()
-                                for groupe, options in CHECKBOX_GROUPS.items():
-                                    for opt in options:
-                                        if re.search(rf"\b{re.escape(opt)}\b", texte):
-                                            checkbox_paras.append((groupe, opt, para))
+                                # Vérifier si nous avons déjà associé ce paragraphe à un groupe
+                                group = para_to_group.get(para)
+                                
+                                if not group:
+                                    # Méthode de secours : détection par les options
+                                    texte = re.sub(r'\s+', ' ', para.text).strip()
+                                    for groupe, options in CHECKBOX_GROUPS.items():
+                                        for opt in options:
+                                            if re.search(rf"\b{re.escape(opt)}\b", texte):
+                                                group = groupe
+                                                break
+                                        if group:
                                             break
-                                    else:
-                                        continue
-                                    break
+                                
+                                if group:
+                                    checkbox_paras.append((group, para))
 
                         # Grouper les paragraphes par groupe
                         group_to_paras = defaultdict(list)
-                        for groupe, opt, para in checkbox_paras:
-                            group_to_paras[groupe].append((opt, para))
+                        for group, para in checkbox_paras:
+                            group_to_paras[group].append(para)
 
                         # Traitement des réponses : cocher (☑) ou décocher (☐)
                         for groupe, paras in group_to_paras.items():
-                            options_presentes = [opt for opt, _ in paras]
-
                             # Déterminer l'option à cocher
                             if groupe in reponses_figees:
                                 option_choisie = reponses_figees[groupe]
                             else:
+                                # Choix aléatoire parmi les options positives
                                 positives_disponibles = [
-                                    opt for opt in options_presentes
+                                    opt for opt in CHECKBOX_GROUPS[groupe]
                                     if groupe in POSITIVE_OPTIONS and opt in POSITIVE_OPTIONS[groupe]
                                 ]
                                 if positives_disponibles:
                                     option_choisie = random.choice(positives_disponibles)
                                 else:
-                                    option_choisie = random.choice(options_presentes) if options_presentes else None
+                                    option_choisie = random.choice(CHECKBOX_GROUPS[groupe]) if CHECKBOX_GROUPS[groupe] else None
 
                             # Appliquer le choix
                             if option_choisie:
-                                for opt, para in paras:
+                                for para in paras:
+                                    # Récupérer toutes les options de ce groupe
+                                    options_presentes = []
                                     for run in para.runs:
                                         if "{{checkbox}}" in run.text:
+                                            # Extraire le texte de l'option
+                                            option_text = run.text.replace("{{checkbox}}", "").strip()
+                                            options_presentes.append(option_text)
+                                    
+                                    # Appliquer le choix
+                                    for run in para.runs:
+                                        if "{{checkbox}}" in run.text:
+                                            option_text = run.text.replace("{{checkbox}}", "").strip()
                                             # Remplacer "{{checkbox}}" par le symbole adéquat
                                             run.text = run.text.replace(
                                                 "{{checkbox}}",
-                                                "☑" if opt == option_choisie else "☐"
+                                                "☑" if option_text == option_choisie else "☐"
                                             )
 
                         # Ajout des sections "Avis & pistes d'amélioration" et "Autres observations"
