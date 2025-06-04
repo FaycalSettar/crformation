@@ -47,8 +47,8 @@ CHECKBOX_GROUPS = {
     "assiduite": ["Très motivés", "Motivés", "Pas motivés"],
     "homogeneite": ["Oui", "Non"],
     "questions": ["Toutes les questions", "A peu près toutes", "Il y a quelques sujets sur lesquels je n'avais pas les réponses", "Je n'ai pas pu répondre à la majorité des questions"],
-    "adaptation": ["Oui", "Non"],  # Groupe pour la question d'adaptation
-    "suivi": ["Oui", "Non", "Non concerné"]  # Groupe pour la question de suivi
+    "adaptation": ["Oui", "Non"],
+    "suivi": ["Oui", "Non", "Non concerné"]
 }
 
 # Étape 1 : Importer les fichiers
@@ -71,24 +71,11 @@ if excel_file and word_file:
         reponses_figees = {}
 
         st.markdown("### Etape 2 : Choisir les réponses à figer (facultatif)")
-        groupes_a_exclure = ["adaptation", "suivi"]  # Groupes à exclure de la sélection
-        
         for groupe, options in CHECKBOX_GROUPS.items():
-            if groupe in groupes_a_exclure:
-                continue  # Sauter les groupes exclus
-            
             figer = st.checkbox(f"Figer la réponse pour : {groupe}", key=f"figer_{groupe}")
             if figer:
                 choix = st.selectbox(f"Choix figé pour {groupe}", options, key=f"choix_{groupe}")
                 reponses_figees[groupe] = choix
-
-        # Ajout des réponses figées pour les questions spécifiques
-        reponses_figees["adaptation"] = "Non"  # Toujours figé à "Non"
-        reponses_figees["suivi"] = "Non concerné"  # Toujours figé à "Non concerné"
-
-        st.info("**Questions systématiquement figées :**")
-        st.markdown("- Avez-vous effectué une quelconque adaptation : **Non**")
-        st.markdown("- Mise à jour du fichier de suivi : **Non concerné**")
 
         pistes = st.text_area("Avis & pistes d'amélioration :", key="pistes")
         observations = st.text_area("Autres observations :", key="obs")
@@ -101,6 +88,14 @@ if excel_file and word_file:
                         doc = Document(word_file)
                         first = participants.iloc[0]
 
+                        # On suppose que votre modèle Word utilise :
+                        #   {{nom}}        pour le nom de famille
+                        #   {{prénom}}     pour le prénom
+                        #   {{formateur}}  pour le nom complet (optionnel)
+                        #   {{ref_session}} pour la référence de session
+                        #   {{formation_dispensee}} pour la formation
+                        #   {{duree_formation}} pour le nombre d'heures
+                        #   {{nb_participants}} pour le nombre de participants
                         replacements = {
                             "{{nom}}": str(first["Nom"]),
                             "{{prénom}}": str(first["Prénom"]),
@@ -116,6 +111,7 @@ if excel_file and word_file:
                             remplacer_placeholders(para, replacements)
 
                         # Collecte des paragraphes contenant le placeholder "{{checkbox}}"
+                        # et correspondant à une option QCM
                         checkbox_paras = []
                         for para in iter_all_paragraphs(doc):
                             if "{{checkbox}}" in para.text:
